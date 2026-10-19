@@ -1,280 +1,450 @@
-import * as THREE from 'three';
+import {
+  Color3,
+  Mesh,
+  MeshBuilder,
+  PBRMaterial,
+  PointLight,
+  Scene,
+  SpotLight,
+  StandardMaterial,
+  TransformNode,
+  Vector3,
+} from '@babylonjs/core';
 import { AttachmentDef, WeaponDef } from '../data/bodycamData';
 
 export interface BuiltWeaponRig {
-  root: THREE.Group;
-  magazineGroup: THREE.Group;
-  brassBulletMesh: THREE.Mesh; // Visible top cartridge during [M] Mag Check!
-  boltGroup: THREE.Group;
-  pumpGroup: THREE.Group;
-  leftHandGroup: THREE.Group;
-  rightHandGroup: THREE.Group;
-  muzzlePoint: THREE.Object3D;
-  ejectionPoint: THREE.Object3D;
-  sightAlignLocal: THREE.Vector3; // Local offset to align camera eye with optic center
-  muzzleFlashMesh: THREE.Mesh;
-  muzzleFlashLight: THREE.PointLight;
-  flashlightSpot: THREE.SpotLight;
-  flashlightTarget: THREE.Object3D;
-  laserBeamMesh: THREE.Mesh;
-  laserDotMesh: THREE.Mesh;
+  root: TransformNode;
+  magazineGroup: TransformNode;
+  brassBulletMesh: Mesh;
+  boltGroup: TransformNode;
+  pumpGroup: TransformNode;
+  leftHandGroup: TransformNode;
+  rightHandGroup: TransformNode;
+  muzzlePoint: TransformNode;
+  ejectionPoint: TransformNode;
+  sightAlignLocal: Vector3;
+  muzzleFlashMesh: Mesh;
+  muzzleFlashLight: PointLight;
+  flashlightSpot: SpotLight;
+  laserBeamMesh: Mesh;
+  laserDotMesh: Mesh;
   hasLaser: boolean;
   hasFlashlight: boolean;
 }
 
+function hexToColor3(hex: number): Color3 {
+  const r = ((hex >> 16) & 255) / 255;
+  const g = ((hex >> 8) & 255) / 255;
+  const b = (hex & 255) / 255;
+  return new Color3(r, g, b);
+}
+
 export class WeaponModelBuilder {
   public static buildWeapon(
+    scene: Scene,
     weapon: WeaponDef,
     attachments: Record<string, AttachmentDef>
   ): BuiltWeaponRig {
-    const root = new THREE.Group();
+    const root = new TransformNode(`weapon_${weapon.id}`, scene);
     const v = weapon.visual;
 
-    const receiverMat = new THREE.MeshStandardMaterial({
-      color: v.receiverColor,
-      roughness: 0.42,
-      metalness: 0.68,
-    });
-    const furnitureMat = new THREE.MeshStandardMaterial({
-      color: v.furnitureColor,
-      roughness: v.stockStyle === 'wood' || v.handguardStyle === 'wood' ? 0.65 : 0.55,
-      metalness: v.stockStyle === 'wood' || v.handguardStyle === 'wood' ? 0.1 : 0.25,
-    });
-    const darkMetalMat = new THREE.MeshStandardMaterial({
-      color: v.metalColor,
-      roughness: 0.35,
-      metalness: 0.85,
-    });
-    const chromeBoltMat = new THREE.MeshStandardMaterial({
-      color: 0xaab2ba,
-      roughness: 0.25,
-      metalness: 0.92,
-    });
+    // Studio-Grade PBR Materials
+    const receiverMat = new PBRMaterial(`recMat_${weapon.id}`, scene);
+    receiverMat.albedoColor = hexToColor3(v.receiverColor);
+    receiverMat.metallic = 0.82;
+    receiverMat.roughness = 0.34;
+
+    const furnitureMat = new PBRMaterial(`furnMat_${weapon.id}`, scene);
+    furnitureMat.albedoColor = hexToColor3(v.furnitureColor);
+    const isWood = v.stockStyle === 'wood' || v.handguardStyle === 'wood';
+    furnitureMat.metallic = isWood ? 0.08 : 0.22;
+    furnitureMat.roughness = isWood ? 0.52 : 0.48;
+
+    const darkSteelMat = new PBRMaterial(`steelMat_${weapon.id}`, scene);
+    darkSteelMat.albedoColor = hexToColor3(v.metalColor);
+    darkSteelMat.metallic = 0.9;
+    darkSteelMat.roughness = 0.28;
+
+    const chromeBoltMat = new PBRMaterial(`chromeMat_${weapon.id}`, scene);
+    chromeBoltMat.albedoColor = new Color3(0.76, 0.79, 0.83);
+    chromeBoltMat.metallic = 0.95;
+    chromeBoltMat.roughness = 0.18;
 
     const isPistol = !!v.isPistol;
     const recW = isPistol ? 0.032 : 0.046;
     const recH = v.receiverHeight;
     const recL = v.receiverLength;
 
-    // 1. Upper & Lower Receiver
-    const receiverGeo = new THREE.BoxGeometry(recW, recH, recL);
-    const receiverMesh = new THREE.Mesh(receiverGeo, receiverMat);
-    receiverMesh.position.set(0, 0, 0);
-    receiverMesh.castShadow = true;
-    root.add(receiverMesh);
+    // 1. Upper & Lower Receiver (In Babylon.js, +Z is forward toward muzzle!)
+    const receiverMesh = MeshBuilder.CreateBox(
+      'receiver',
+      { width: recW, height: recH, depth: recL },
+      scene
+    );
+    receiverMesh.material = receiverMat;
+    receiverMesh.parent = root;
+    receiverMesh.isPickable = false;
 
-    // Top Picatinny Rail (for rifles/SMGs/shotguns)
+    // beveled upper receiver detail & Picatinny Rail Teeth
     if (!isPistol) {
-      const railGeo = new THREE.BoxGeometry(recW * 0.72, 0.01, recL * 0.92);
-      const railMesh = new THREE.Mesh(railGeo, darkMetalMat);
-      railMesh.position.set(0, recH * 0.5 + 0.005, -0.01);
-      root.add(railMesh);
+      const railBase = MeshBuilder.CreateBox(
+        'railBase',
+        { width: recW * 0.72, height: 0.008, depth: recL * 0.95 },
+        scene
+      );
+      railBase.position.set(0, recH * 0.5 + 0.004, 0.01);
+      railBase.material = darkSteelMat;
+      railBase.parent = root;
+      railBase.isPickable = false;
+
+      // Individual Picatinny Rail Lugs
+      const numLugs = 12;
+      for (let i = 0; i < numLugs; i++) {
+        const lug = MeshBuilder.CreateBox(
+          `lug_${i}`,
+          { width: recW * 0.76, height: 0.005, depth: 0.01 },
+          scene
+        );
+        lug.position.set(
+          0,
+          recH * 0.5 + 0.009,
+          -recL * 0.42 + (i / (numLugs - 1)) * (recL * 0.86)
+        );
+        lug.material = darkSteelMat;
+        lug.parent = root;
+        lug.isPickable = false;
+      }
     }
 
-    // 2. Pistol Grip & Trigger Guard
-    const gripGeo = new THREE.BoxGeometry(recW * 0.78, 0.105, 0.044);
-    const gripMesh = new THREE.Mesh(gripGeo, furnitureMat);
-    gripMesh.position.set(0, -recH * 0.5 - 0.042, isPistol ? 0.035 : recL * 0.26);
-    gripMesh.rotation.x = -0.26;
-    root.add(gripMesh);
+    // 2. Ergonomic Pistol Grip & Trigger Guard
+    const gripMesh = MeshBuilder.CreateBox(
+      'grip',
+      { width: recW * 0.76, height: 0.105, depth: 0.044 },
+      scene
+    );
+    gripMesh.position.set(0, -recH * 0.5 - 0.042, isPistol ? -0.035 : -recL * 0.26);
+    gripMesh.rotation.x = 0.28;
+    gripMesh.material = furnitureMat;
+    gripMesh.parent = root;
+    gripMesh.isPickable = false;
 
-    const guardGeo = new THREE.BoxGeometry(recW * 0.4, 0.026, 0.055);
-    const guardMesh = new THREE.Mesh(guardGeo, darkMetalMat);
-    guardMesh.position.set(0, -recH * 0.5 - 0.014, isPistol ? -0.005 : recL * 0.12);
-    root.add(guardMesh);
+    const guardMesh = MeshBuilder.CreateBox(
+      'triggerGuard',
+      { width: recW * 0.42, height: 0.026, depth: 0.056 },
+      scene
+    );
+    guardMesh.position.set(0, -recH * 0.5 - 0.014, isPistol ? 0.005 : -recL * 0.12);
+    guardMesh.material = darkSteelMat;
+    guardMesh.parent = root;
+    guardMesh.isPickable = false;
 
-    // 3. Barrel & Handguard
-    const barrelStartZ = -recL * 0.5;
+    // 3. Barrel, Gas Block & Ventilated Handguard (+Z forward)
+    const barrelStartZ = recL * 0.5;
     const barrelLen = v.barrelLength;
     const barrelRadius = isPistol ? 0.008 : weapon.category === 'Shotguns' ? 0.013 : 0.01;
-    const barrelGeo = new THREE.CylinderGeometry(barrelRadius, barrelRadius * 1.1, barrelLen, 12);
-    barrelGeo.rotateX(Math.PI / 2);
-    const barrelMesh = new THREE.Mesh(barrelGeo, darkMetalMat);
-    barrelMesh.position.set(0, isPistol ? recH * 0.1 : recH * 0.12, barrelStartZ - barrelLen * 0.5 + 0.04);
-    root.add(barrelMesh);
+    const barrelMesh = MeshBuilder.CreateCylinder(
+      'barrel',
+      { diameter: barrelRadius * 2, height: barrelLen, tessellation: 14 },
+      scene
+    );
+    barrelMesh.rotation.x = Math.PI / 2;
+    barrelMesh.position.set(
+      0,
+      isPistol ? recH * 0.1 : recH * 0.12,
+      barrelStartZ + barrelLen * 0.5 - 0.04
+    );
+    barrelMesh.material = darkSteelMat;
+    barrelMesh.parent = root;
+    barrelMesh.isPickable = false;
 
-    // Handguard / Pump Forend
-    const pumpGroup = new THREE.Group();
-    root.add(pumpGroup);
+    const pumpGroup = new TransformNode('pumpGroup', scene);
+    pumpGroup.parent = root;
 
     if (!isPistol) {
       const hgLen = Math.min(barrelLen * 0.72, 0.32);
-      const hgW = recW * 1.04;
-      const hgH = recH * 0.86;
-      const hgGeo = new THREE.BoxGeometry(hgW, hgH, hgLen);
-      const hgMesh = new THREE.Mesh(
-        hgGeo,
-        v.handguardStyle === 'quadrail' ? darkMetalMat : furnitureMat
-      );
-      hgMesh.position.set(0, 0.004, barrelStartZ - hgLen * 0.5 + 0.02);
+      const hgW = recW * 1.05;
+      const hgH = recH * 0.88;
 
       if (v.handguardStyle === 'shotgun_pump') {
-        // Under-barrel magazine tube for shotguns
-        const tubeGeo = new THREE.CylinderGeometry(0.011, 0.011, barrelLen * 0.92, 10);
-        tubeGeo.rotateX(Math.PI / 2);
-        const tubeMesh = new THREE.Mesh(tubeGeo, darkMetalMat);
-        tubeMesh.position.set(0, -0.012, barrelStartZ - barrelLen * 0.44);
-        root.add(tubeMesh);
+        const tube = MeshBuilder.CreateCylinder(
+          'magTube',
+          { diameter: 0.022, height: barrelLen * 0.92, tessellation: 12 },
+          scene
+        );
+        tube.rotation.x = Math.PI / 2;
+        tube.position.set(0, -0.012, barrelStartZ + barrelLen * 0.44);
+        tube.material = darkSteelMat;
+        tube.parent = root;
+        tube.isPickable = false;
 
-        // Sliding pump forend
-        const pumpForendGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.16, 12);
-        pumpForendGeo.rotateX(Math.PI / 2);
-        const pumpForend = new THREE.Mesh(pumpForendGeo, furnitureMat);
-        pumpForend.position.set(0, -0.014, barrelStartZ - 0.15);
-        pumpGroup.add(pumpForend);
+        const pumpForend = MeshBuilder.CreateCylinder(
+          'pumpForend',
+          { diameter: 0.044, height: 0.165, tessellation: 14 },
+          scene
+        );
+        pumpForend.rotation.x = Math.PI / 2;
+        pumpForend.position.set(0, -0.014, barrelStartZ + 0.15);
+        pumpForend.material = furnitureMat;
+        pumpForend.parent = pumpGroup;
+        pumpForend.isPickable = false;
       } else {
-        root.add(hgMesh);
+        const hgMesh = MeshBuilder.CreateBox(
+          'handguard',
+          { width: hgW, height: hgH, depth: hgLen },
+          scene
+        );
+        hgMesh.position.set(0, 0.004, barrelStartZ + hgLen * 0.5 - 0.02);
+        hgMesh.material = v.handguardStyle === 'quadrail' ? darkSteelMat : furnitureMat;
+        hgMesh.parent = root;
+        hgMesh.isPickable = false;
       }
     }
 
-    // 4. Stock Assembly
+    // 4. Buttstock Assembly (-Z rearward)
     if (!isPistol && v.stockStyle !== 'none') {
-      const stockZ = recL * 0.5 + 0.12;
+      const stockZ = -recL * 0.5 - 0.11;
       if (v.stockStyle === 'wire' || v.stockStyle === 'folded') {
-        const rodGeo = new THREE.CylinderGeometry(0.006, 0.006, 0.22, 8);
-        rodGeo.rotateX(Math.PI / 2);
-        const rod = new THREE.Mesh(rodGeo, darkMetalMat);
+        const rod = MeshBuilder.CreateCylinder(
+          'stockRod',
+          { diameter: 0.014, height: 0.22, tessellation: 10 },
+          scene
+        );
+        rod.rotation.x = Math.PI / 2;
         rod.position.set(0, 0.01, stockZ);
-        root.add(rod);
-        const buttGeo = new THREE.BoxGeometry(0.036, 0.095, 0.02);
-        const butt = new THREE.Mesh(buttGeo, darkMetalMat);
-        butt.position.set(0, -0.01, stockZ + 0.11);
-        root.add(butt);
+        rod.material = darkSteelMat;
+        rod.parent = root;
+        rod.isPickable = false;
+
+        const butt = MeshBuilder.CreateBox(
+          'buttplate',
+          { width: 0.038, height: 0.096, depth: 0.022 },
+          scene
+        );
+        butt.position.set(0, -0.01, stockZ - 0.11);
+        butt.material = darkSteelMat;
+        butt.parent = root;
+        butt.isPickable = false;
       } else {
-        const stockGeo = new THREE.BoxGeometry(recW * 0.88, recH * 1.15, 0.24);
-        const stockMesh = new THREE.Mesh(stockGeo, furnitureMat);
+        const stockMesh = MeshBuilder.CreateBox(
+          'stock',
+          { width: recW * 0.88, height: recH * 1.14, depth: 0.23 },
+          scene
+        );
         stockMesh.position.set(0, -0.012, stockZ);
-        root.add(stockMesh);
+        stockMesh.material = furnitureMat;
+        stockMesh.parent = root;
+        stockMesh.isPickable = false;
       }
     }
 
-    // 5. Articulated Bolt / Slide Group (reciprocates on fire & bolt-slap)
-    const boltGroup = new THREE.Group();
-    root.add(boltGroup);
+    // 5. Articulated Bolt Carrier / Slide Group (kicks backward along -Z on fire!)
+    const boltGroup = new TransformNode('boltGroup', scene);
+    boltGroup.parent = root;
+
     if (isPistol) {
       if (v.isRevolver) {
-        const cylGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.048, 8);
-        cylGeo.rotateX(Math.PI / 2);
-        const cylMesh = new THREE.Mesh(cylGeo, chromeBoltMat);
-        cylMesh.position.set(0, 0.004, -0.01);
-        boltGroup.add(cylMesh);
+        const cylMesh = MeshBuilder.CreateCylinder(
+          'revolverCylinder',
+          { diameter: 0.044, height: 0.048, tessellation: 10 },
+          scene
+        );
+        cylMesh.rotation.x = Math.PI / 2;
+        cylMesh.position.set(0, 0.005, 0.01);
+        cylMesh.material = chromeBoltMat;
+        cylMesh.parent = boltGroup;
+        cylMesh.isPickable = false;
       } else {
-        const slideGeo = new THREE.BoxGeometry(recW * 1.05, recH * 0.72, recL * 1.02);
-        const slideMesh = new THREE.Mesh(slideGeo, receiverMat);
-        slideMesh.position.set(0, recH * 0.25, -0.005);
-        boltGroup.add(slideMesh);
+        const slideMesh = MeshBuilder.CreateBox(
+          'pistolSlide',
+          { width: recW * 1.06, height: recH * 0.74, depth: recL * 1.02 },
+          scene
+        );
+        slideMesh.position.set(0, recH * 0.26, 0.005);
+        slideMesh.material = receiverMat;
+        slideMesh.parent = boltGroup;
+        slideMesh.isPickable = false;
       }
     } else {
-      // Ejection port bolt carrier + charging handle
-      const portGeo = new THREE.BoxGeometry(0.008, 0.018, 0.068);
-      const portMesh = new THREE.Mesh(portGeo, chromeBoltMat);
-      portMesh.position.set(recW * 0.5 + 0.002, 0.012, -0.02);
-      boltGroup.add(portMesh);
+      const portMesh = MeshBuilder.CreateBox(
+        'boltCarrier',
+        { width: 0.008, height: 0.019, depth: 0.07 },
+        scene
+      );
+      portMesh.position.set(recW * 0.5 + 0.002, 0.012, 0.02);
+      portMesh.material = chromeBoltMat;
+      portMesh.parent = boltGroup;
+      portMesh.isPickable = false;
 
-      const handleGeo = new THREE.BoxGeometry(0.028, 0.01, 0.014);
-      const handleMesh = new THREE.Mesh(handleGeo, darkMetalMat);
-      handleMesh.position.set(recW * 0.5 + 0.014, 0.014, -0.04);
-      boltGroup.add(handleMesh);
+      const handleMesh = MeshBuilder.CreateBox(
+        'chargingHandle',
+        { width: 0.03, height: 0.01, depth: 0.014 },
+        scene
+      );
+      handleMesh.position.set(recW * 0.5 + 0.015, 0.014, 0.04);
+      handleMesh.material = darkSteelMat;
+      handleMesh.parent = boltGroup;
+      handleMesh.isPickable = false;
     }
 
-    // 6. Articulated Magazine Group (detaches on reload + tilts on [M] Mag Check!)
-    const magazineGroup = new THREE.Group();
-    const magZ = isPistol ? 0.035 : -0.045;
+    // 6. Detachable Magazine Group + Visible Brass Cartridge for [M] Mag Check
+    const magazineGroup = new TransformNode('magazineGroup', scene);
+    const magZ = isPistol ? -0.035 : 0.048;
     const magY = -recH * 0.5;
     magazineGroup.position.set(0, magY, magZ);
-    root.add(magazineGroup);
+    magazineGroup.parent = root;
 
     const magMod = attachments.magazine?.modifiers;
     const extraLen = magMod?.magCapDelta ? 0.045 : 0;
     const magLen = v.magLength + extraLen;
 
     if (v.magLength > 0.04) {
-      const magGeo = new THREE.BoxGeometry(recW * 0.68, magLen, 0.056);
-      const magMesh = new THREE.Mesh(
-        magGeo,
-        weapon.id.startsWith('ka') ? furnitureMat : darkMetalMat
+      const magMesh = MeshBuilder.CreateBox(
+        'magazineBody',
+        { width: recW * 0.68, height: magLen, depth: 0.056 },
+        scene
       );
-      magMesh.position.set(0, -magLen * 0.48, -v.magCurvature * 0.025);
-      magMesh.rotation.x = v.magCurvature * 0.28;
-      magazineGroup.add(magMesh);
+      magMesh.position.set(0, -magLen * 0.48, v.magCurvature * 0.025);
+      magMesh.rotation.x = -v.magCurvature * 0.28;
+      magMesh.material = weapon.id.startsWith('ka') ? furnitureMat : darkSteelMat;
+      magMesh.parent = magazineGroup;
+      magMesh.isPickable = false;
     }
 
-    // Top visible brass cartridge inside magazine feed lips (visible when checking mag!)
-    const brassMat = new THREE.MeshStandardMaterial({
-      color: 0xd4af37,
-      roughness: 0.25,
-      metalness: 0.9,
-    });
-    const brassGeo = new THREE.CylinderGeometry(0.0055, 0.006, 0.038, 8);
-    brassGeo.rotateX(Math.PI / 2);
-    const brassBulletMesh = new THREE.Mesh(brassGeo, brassMat);
-    brassBulletMesh.position.set(0, 0.005, 0);
-    magazineGroup.add(brassBulletMesh);
+    const brassMat = new PBRMaterial(`brassMat_${weapon.id}`, scene);
+    brassMat.albedoColor = new Color3(0.88, 0.72, 0.24);
+    brassMat.metallic = 0.92;
+    brassMat.roughness = 0.2;
 
-    // 7. ATTACHMENTS: OPTICS & SIGHT ALIGNMENT
+    const brassBulletMesh = MeshBuilder.CreateCylinder(
+      'topBrassCartridge',
+      { diameter: 0.011, height: 0.038, tessellation: 10 },
+      scene
+    );
+    brassBulletMesh.rotation.x = Math.PI / 2;
+    brassBulletMesh.position.set(0, 0.005, 0);
+    brassBulletMesh.material = brassMat;
+    brassBulletMesh.parent = magazineGroup;
+    brassBulletMesh.isPickable = false;
+
+    // 7. ATTACHMENTS: OPTICS & TRUE HDR EMISSIVE RETICLES
     const opticMod = attachments.optic?.modifiers;
     const opticType = opticMod?.opticType || 'iron';
-    const topY = isPistol ? recH * 0.62 : recH * 0.5 + 0.01;
+    const topY = isPistol ? recH * 0.62 : recH * 0.5 + 0.012;
     let sightAlignY = topY + 0.022;
 
+    // HDR Glowing Emissive Material for Reticles
+    const greenTritiumMat = new StandardMaterial('tritiumMat', scene);
+    greenTritiumMat.disableLighting = true;
+    greenTritiumMat.emissiveColor = new Color3(0.2, 2.2, 0.55); // >1.0 triggers Babylon HDR Bloom!
+
+    const redReticleMat = new StandardMaterial('redReticleMat', scene);
+    redReticleMat.disableLighting = true;
+    redReticleMat.emissiveColor = new Color3(2.8, 0.22, 0.18);
+
     if (opticType === 'iron') {
-      // Front post with glowing green tritium night-sight dot
-      const frontPostGeo = new THREE.BoxGeometry(0.004, 0.022, 0.006);
-      const frontPost = new THREE.Mesh(frontPostGeo, darkMetalMat);
-      const frontZ = isPistol ? -recL * 0.46 : barrelStartZ - barrelLen * 0.65;
+      const frontZ = isPistol ? recL * 0.46 : barrelStartZ + barrelLen * 0.65;
+      const frontPost = MeshBuilder.CreateBox(
+        'frontPost',
+        { width: 0.004, height: 0.022, depth: 0.006 },
+        scene
+      );
       frontPost.position.set(0, topY + 0.011, frontZ);
-      root.add(frontPost);
+      frontPost.material = darkSteelMat;
+      frontPost.parent = root;
+      frontPost.isPickable = false;
 
-      const tritiumMat = new THREE.MeshBasicMaterial({ color: 0x33ff66 });
-      const tritiumDot = new THREE.Mesh(new THREE.SphereGeometry(0.0022, 6, 6), tritiumMat);
-      tritiumDot.position.set(0, topY + 0.021, frontZ + 0.003);
-      root.add(tritiumDot);
+      const tritiumDot = MeshBuilder.CreateSphere(
+        'tritiumFront',
+        { diameter: 0.0044, segments: 8 },
+        scene
+      );
+      tritiumDot.position.set(0, topY + 0.021, frontZ - 0.003);
+      tritiumDot.material = greenTritiumMat;
+      tritiumDot.parent = root;
+      tritiumDot.isPickable = false;
 
-      // Rear notch aperture (left & right ears)
-      const rearZ = isPistol ? recL * 0.42 : recL * 0.35;
-      const earGeo = new THREE.BoxGeometry(0.006, 0.02, 0.008);
-      const earL = new THREE.Mesh(earGeo, darkMetalMat);
-      earL.position.set(-0.009, topY + 0.01, rearZ);
-      const earR = new THREE.Mesh(earGeo, darkMetalMat);
-      earR.position.set(0.009, topY + 0.01, rearZ);
-      root.add(earL, earR);
-
-      sightAlignY = topY + 0.02;
-    } else if (opticType === 'reddot' || opticType === 'holo') {
-      const mountZ = isPistol ? 0.01 : 0.02;
-      const housingW = opticType === 'holo' ? 0.042 : 0.034;
-      const housingH = opticType === 'holo' ? 0.044 : 0.036;
-      const baseGeo = new THREE.BoxGeometry(housingW, 0.012, 0.056);
-      const baseMesh = new THREE.Mesh(baseGeo, darkMetalMat);
-      baseMesh.position.set(0, topY + 0.006, mountZ);
-      root.add(baseMesh);
-
-      // Left, Right, Top hood walls (open center window!)
-      const wallGeo = new THREE.BoxGeometry(0.004, housingH, 0.048);
-      const wallL = new THREE.Mesh(wallGeo, darkMetalMat);
-      wallL.position.set(-housingW * 0.46, topY + 0.012 + housingH * 0.5, mountZ);
-      const wallR = new THREE.Mesh(wallGeo, darkMetalMat);
-      wallR.position.set(housingW * 0.46, topY + 0.012 + housingH * 0.5, mountZ);
-      const roofGeo = new THREE.BoxGeometry(housingW, 0.004, 0.048);
-      const roof = new THREE.Mesh(roofGeo, darkMetalMat);
-      roof.position.set(0, topY + 0.012 + housingH, mountZ);
-      root.add(wallL, wallR, roof);
-
-      // Illuminated Reticle inside the glass window
-      const reticleCenterY = topY + 0.012 + housingH * 0.5;
-      const dotMat = new THREE.MeshBasicMaterial({
-        color: 0xff2222,
-        side: THREE.DoubleSide,
+      const rearZ = isPistol ? -recL * 0.42 : -recL * 0.35;
+      [-0.009, 0.009].forEach((rx, idx) => {
+        const ear = MeshBuilder.CreateBox(
+          `rearEar_${idx}`,
+          { width: 0.006, height: 0.02, depth: 0.008 },
+          scene
+        );
+        ear.position.set(rx, topY + 0.01, rearZ);
+        ear.material = darkSteelMat;
+        ear.parent = root;
+        ear.isPickable = false;
       });
-      const dotMesh = new THREE.Mesh(new THREE.CircleGeometry(0.0018, 12), dotMat);
+
+      sightAlignY = topY + 0.021;
+    } else if (opticType === 'reddot' || opticType === 'holo') {
+      const mountZ = isPistol ? -0.01 : -0.015;
+      const housingW = opticType === 'holo' ? 0.044 : 0.035;
+      const housingH = opticType === 'holo' ? 0.045 : 0.036;
+
+      const baseMesh = MeshBuilder.CreateBox(
+        'opticBase',
+        { width: housingW, height: 0.012, depth: 0.056 },
+        scene
+      );
+      baseMesh.position.set(0, topY + 0.006, mountZ);
+      baseMesh.material = darkSteelMat;
+      baseMesh.parent = root;
+      baseMesh.isPickable = false;
+
+      const wallL = MeshBuilder.CreateBox(
+        'opticWallL',
+        { width: 0.004, height: housingH, depth: 0.048 },
+        scene
+      );
+      wallL.position.set(-housingW * 0.46, topY + 0.012 + housingH * 0.5, mountZ);
+      wallL.material = darkSteelMat;
+      wallL.parent = root;
+      wallL.isPickable = false;
+
+      const wallR = MeshBuilder.CreateBox(
+        'opticWallR',
+        { width: 0.004, height: housingH, depth: 0.048 },
+        scene
+      );
+      wallR.position.set(housingW * 0.46, topY + 0.012 + housingH * 0.5, mountZ);
+      wallR.material = darkSteelMat;
+      wallR.parent = root;
+      wallR.isPickable = false;
+
+      const roof = MeshBuilder.CreateBox(
+        'opticRoof',
+        { width: housingW, height: 0.004, depth: 0.048 },
+        scene
+      );
+      roof.position.set(0, topY + 0.012 + housingH, mountZ);
+      roof.material = darkSteelMat;
+      roof.parent = root;
+      roof.isPickable = false;
+
+      // Illuminated Holographic / Reflex Reticle inside optic window
+      const reticleCenterY = topY + 0.012 + housingH * 0.5;
+      const dotMesh = MeshBuilder.CreateDisc(
+        'reticleDot',
+        { radius: 0.0018, tessellation: 14, sideOrientation: Mesh.DOUBLESIDE },
+        scene
+      );
       dotMesh.position.set(0, reticleCenterY, mountZ);
-      root.add(dotMesh);
+      dotMesh.material = redReticleMat;
+      dotMesh.parent = root;
+      dotMesh.isPickable = false;
 
       if (opticType === 'holo') {
-        const ringGeo = new THREE.RingGeometry(0.0065, 0.0078, 20);
-        const ringMesh = new THREE.Mesh(ringGeo, dotMat);
+        const ringMesh = MeshBuilder.CreateTorus(
+          'holoRing',
+          { diameter: 0.015, thickness: 0.0012, tessellation: 24 },
+          scene
+        );
+        ringMesh.rotation.x = Math.PI / 2;
         ringMesh.position.set(0, reticleCenterY, mountZ);
-        root.add(ringMesh);
+        ringMesh.material = redReticleMat;
+        ringMesh.parent = root;
+        ringMesh.isPickable = false;
       }
 
       sightAlignY = reticleCenterY;
@@ -283,168 +453,254 @@ export class WeaponModelBuilder {
       const scopeR = opticType === 'sniper8x' ? 0.022 : 0.019;
       const centerY = topY + 0.032;
 
-      // Scope rings + open tube with crosshair
-      const ringGeo = new THREE.TorusGeometry(scopeR, 0.004, 8, 18);
-      const ringFront = new THREE.Mesh(ringGeo, darkMetalMat);
-      ringFront.position.set(0, centerY, -scopeLen * 0.45);
-      const ringRear = new THREE.Mesh(ringGeo, darkMetalMat);
-      ringRear.position.set(0, centerY, scopeLen * 0.45);
-      root.add(ringFront, ringRear);
-
-      // Crosshair reticle wires inside scope
-      const wireMat = new THREE.MeshBasicMaterial({
-        color: opticType === 'acog' ? 0xff3322 : 0x22ff55,
+      [-scopeLen * 0.45, scopeLen * 0.45].forEach((sz, idx) => {
+        const ring = MeshBuilder.CreateTorus(
+          `scopeRing_${idx}`,
+          { diameter: scopeR * 2, thickness: 0.007, tessellation: 20 },
+          scene
+        );
+        ring.rotation.x = Math.PI / 2;
+        ring.position.set(0, centerY, sz);
+        ring.material = darkSteelMat;
+        ring.parent = root;
+        ring.isPickable = false;
       });
-      const hWire = new THREE.Mesh(new THREE.BoxGeometry(scopeR * 1.7, 0.0008, 0.001), wireMat);
+
+      const hWire = MeshBuilder.CreateBox(
+        'scopeWireH',
+        { width: scopeR * 1.7, height: 0.0008, depth: 0.001 },
+        scene
+      );
       hWire.position.set(0, centerY, 0);
-      const vWire = new THREE.Mesh(new THREE.BoxGeometry(0.0008, scopeR * 1.7, 0.001), wireMat);
+      hWire.material = opticType === 'acog' ? redReticleMat : greenTritiumMat;
+      hWire.parent = root;
+      hWire.isPickable = false;
+
+      const vWire = MeshBuilder.CreateBox(
+        'scopeWireV',
+        { width: 0.0008, height: scopeR * 1.7, depth: 0.001 },
+        scene
+      );
       vWire.position.set(0, centerY, 0);
-      root.add(hWire, vWire);
+      vWire.material = opticType === 'acog' ? redReticleMat : greenTritiumMat;
+      vWire.parent = root;
+      vWire.isPickable = false;
 
       sightAlignY = centerY;
     }
 
-    // 8. ATTACHMENTS: MUZZLE & SUPPRESSOR
+    // 8. ATTACHMENTS: MUZZLE & SUPPRESSOR (+Z forward tip)
     const muzzleMod = attachments.muzzle?.modifiers;
-    const barrelTipZ = barrelStartZ - barrelLen + 0.04;
+    const barrelTipZ = barrelStartZ + barrelLen - 0.04;
     let finalMuzzleZ = barrelTipZ;
 
     if (muzzleMod?.suppressed) {
       const supLen = isPistol ? 0.14 : 0.19;
-      const supGeo = new THREE.CylinderGeometry(0.019, 0.019, supLen, 14);
-      supGeo.rotateX(Math.PI / 2);
-      const supMesh = new THREE.Mesh(supGeo, darkMetalMat);
-      supMesh.position.set(0, barrelMesh.position.y, barrelTipZ - supLen * 0.5);
-      root.add(supMesh);
-      finalMuzzleZ = barrelTipZ - supLen;
+      const supMesh = MeshBuilder.CreateCylinder(
+        'suppressor',
+        { diameter: 0.038, height: supLen, tessellation: 16 },
+        scene
+      );
+      supMesh.rotation.x = Math.PI / 2;
+      supMesh.position.set(0, barrelMesh.position.y, barrelTipZ + supLen * 0.5);
+      supMesh.material = darkSteelMat;
+      supMesh.parent = root;
+      supMesh.isPickable = false;
+      finalMuzzleZ = barrelTipZ + supLen;
     } else {
       const brakeLen = 0.045;
-      const brakeGeo = new THREE.CylinderGeometry(barrelRadius * 1.35, barrelRadius * 1.25, brakeLen, 10);
-      brakeGeo.rotateX(Math.PI / 2);
-      const brakeMesh = new THREE.Mesh(brakeGeo, darkMetalMat);
-      brakeMesh.position.set(0, barrelMesh.position.y, barrelTipZ - brakeLen * 0.5);
-      root.add(brakeMesh);
-      finalMuzzleZ = barrelTipZ - brakeLen;
+      const brakeMesh = MeshBuilder.CreateCylinder(
+        'muzzleBrake',
+        { diameter: barrelRadius * 2.6, height: brakeLen, tessellation: 12 },
+        scene
+      );
+      brakeMesh.rotation.x = Math.PI / 2;
+      brakeMesh.position.set(0, barrelMesh.position.y, barrelTipZ + brakeLen * 0.5);
+      brakeMesh.material = darkSteelMat;
+      brakeMesh.parent = root;
+      brakeMesh.isPickable = false;
+      finalMuzzleZ = barrelTipZ + brakeLen;
     }
 
-    // 9. ATTACHMENTS: FOREGRIP
+    // 9. ATTACHMENTS: UNDERBARREL FOREGRIP
     const gripId = attachments.grip?.id;
     if (!isPistol && gripId === 'grip_vert') {
-      const vgGeo = new THREE.CylinderGeometry(0.014, 0.015, 0.095, 10);
-      const vgMesh = new THREE.Mesh(vgGeo, furnitureMat);
-      vgMesh.position.set(0, -recH * 0.5 - 0.045, barrelStartZ - 0.14);
-      root.add(vgMesh);
+      const vgMesh = MeshBuilder.CreateCylinder(
+        'vertGrip',
+        { diameter: 0.029, height: 0.095, tessellation: 12 },
+        scene
+      );
+      vgMesh.position.set(0, -recH * 0.5 - 0.045, barrelStartZ + 0.14);
+      vgMesh.material = furnitureMat;
+      vgMesh.parent = root;
+      vgMesh.isPickable = false;
     } else if (!isPistol && gripId === 'grip_angled') {
-      const agGeo = new THREE.BoxGeometry(0.028, 0.032, 0.095);
-      const agMesh = new THREE.Mesh(agGeo, furnitureMat);
-      agMesh.position.set(0, -recH * 0.5 - 0.012, barrelStartZ - 0.14);
-      agMesh.rotation.x = 0.25;
-      root.add(agMesh);
+      const agMesh = MeshBuilder.CreateBox(
+        'angledGrip',
+        { width: 0.028, height: 0.032, depth: 0.095 },
+        scene
+      );
+      agMesh.position.set(0, -recH * 0.5 - 0.012, barrelStartZ + 0.14);
+      agMesh.rotation.x = -0.25;
+      agMesh.material = furnitureMat;
+      agMesh.parent = root;
+      agMesh.isPickable = false;
     }
 
-    // 10. MUZZLE POINT, FLASH & EJECTION POINT
-    const muzzlePoint = new THREE.Object3D();
-    muzzlePoint.position.set(0, barrelMesh.position.y, finalMuzzleZ - 0.01);
-    root.add(muzzlePoint);
+    // 10. MUZZLE POINT, HDR BLOOM FLASH & BRASS EJECTION PORT
+    const muzzlePoint = new TransformNode('muzzlePoint', scene);
+    muzzlePoint.position.set(0, barrelMesh.position.y, finalMuzzleZ + 0.015);
+    muzzlePoint.parent = root;
 
-    const ejectionPoint = new THREE.Object3D();
-    ejectionPoint.position.set(recW * 0.6, 0.015, -0.02);
-    root.add(ejectionPoint);
+    const ejectionPoint = new TransformNode('ejectionPoint', scene);
+    ejectionPoint.position.set(recW * 0.6, 0.015, 0.02);
+    ejectionPoint.parent = root;
 
-    const flashMat = new THREE.MeshBasicMaterial({
-      color: 0xffbb44,
-      transparent: true,
-      opacity: 0,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const flashGeo = new THREE.DodecahedronGeometry(0.075, 0);
-    const muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
-    muzzlePoint.add(muzzleFlashMesh);
+    const flashMat = new StandardMaterial('muzzleFlashMat', scene);
+    flashMat.disableLighting = true;
+    flashMat.emissiveColor = new Color3(3.5, 2.1, 0.6); // Strong HDR Bloom!
+    flashMat.alpha = 0;
 
-    const muzzleFlashLight = new THREE.PointLight(0xffaa33, 0, 9, 2);
-    muzzlePoint.add(muzzleFlashLight);
+    const muzzleFlashMesh = MeshBuilder.CreatePolyhedron(
+      'muzzleFlash',
+      { type: 2, size: 0.068 },
+      scene
+    );
+    muzzleFlashMesh.material = flashMat;
+    muzzleFlashMesh.parent = muzzlePoint;
+    muzzleFlashMesh.isPickable = false;
 
-    // 11. TACTICAL RAIL MODULE (Flashlight SpotLight + 3D Laser Beam)
+    const muzzleFlashLight = new PointLight('muzzleFlashLight', Vector3.Zero(), scene);
+    muzzleFlashLight.parent = muzzlePoint;
+    muzzleFlashLight.diffuse = new Color3(1.0, 0.72, 0.32);
+    muzzleFlashLight.intensity = 0;
+    muzzleFlashLight.range = 11;
+
+    // 11. TACTICAL RAIL MODULE (Real SpotLight Flashlight + HDR Laser Beam & World Hit Dot)
     const tacMod = attachments.tactical?.modifiers;
     const hasFlashlight = tacMod?.hasFlashlight !== false;
     const hasLaser = tacMod?.hasLaser !== false;
     const laserHex = tacMod?.laserColor || 0x22ff66;
 
-    const peqZ = isPistol ? barrelStartZ - 0.04 : barrelStartZ - 0.18;
+    const peqZ = isPistol ? barrelStartZ + 0.04 : barrelStartZ + 0.18;
     const peqX = isPistol ? 0 : recW * 0.58;
     const peqY = isPistol ? -recH * 0.45 : 0.005;
 
-    const peqBox = new THREE.Mesh(
-      new THREE.BoxGeometry(0.024, 0.022, 0.068),
-      darkMetalMat
+    const peqBox = MeshBuilder.CreateBox(
+      'peqBox',
+      { width: 0.024, height: 0.022, depth: 0.068 },
+      scene
     );
     peqBox.position.set(peqX, peqY, peqZ);
-    root.add(peqBox);
+    peqBox.material = darkSteelMat;
+    peqBox.parent = root;
+    peqBox.isPickable = false;
 
-    const flashlightSpot = new THREE.SpotLight(0xfff6e5, 0, 42, Math.PI / 5.2, 0.45, 1.3);
-    flashlightSpot.position.set(peqX, peqY, peqZ - 0.035);
-    const flashlightTarget = new THREE.Object3D();
-    flashlightTarget.position.set(peqX, peqY, peqZ - 10);
-    root.add(flashlightSpot);
-    root.add(flashlightTarget);
-    flashlightSpot.target = flashlightTarget;
+    const flashlightSpot = new SpotLight(
+      'weaponFlashlight',
+      new Vector3(peqX, peqY, peqZ + 0.036),
+      new Vector3(0, 0, 1),
+      Math.PI / 3.4,
+      6,
+      scene
+    );
+    flashlightSpot.parent = root;
+    flashlightSpot.diffuse = new Color3(1.0, 0.97, 0.9);
+    flashlightSpot.intensity = 0;
+    flashlightSpot.range = 48;
 
-    // 3D Volumetric Laser Beam & World Hit Dot
-    const laserMat = new THREE.MeshBasicMaterial({
-      color: laserHex,
-      transparent: true,
-      opacity: hasLaser ? 0.42 : 0,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const laserGeo = new THREE.CylinderGeometry(0.001, 0.001, 1, 6);
-    laserGeo.rotateX(Math.PI / 2);
-    laserGeo.translate(0, 0, -0.5); // anchor at origin and extend along -Z
-    const laserBeamMesh = new THREE.Mesh(laserGeo, laserMat);
-    laserBeamMesh.position.set(peqX, peqY, peqZ - 0.034);
-    root.add(laserBeamMesh);
+    const laserCol = hexToColor3(laserHex);
+    const laserMat = new StandardMaterial('laserBeamMat', scene);
+    laserMat.disableLighting = true;
+    laserMat.emissiveColor = laserCol.scale(2.4); // Blooms in HDR!
+    laserMat.alpha = hasLaser ? 0.55 : 0;
 
-    const dotMat = new THREE.MeshBasicMaterial({
-      color: laserHex,
-      blending: THREE.AdditiveBlending,
-      depthTest: false,
-    });
-    const laserDotMesh = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), dotMat);
-    laserDotMesh.visible = hasLaser;
+    // Cylinder of height 1 rotated along +Z and shifted by +0.5 Z so scaling.z extends forward from PEQ tip
+    const laserBeamMesh = MeshBuilder.CreateCylinder(
+      'laserBeam',
+      { diameter: 0.0018, height: 1.0, tessellation: 8 },
+      scene
+    );
+    laserBeamMesh.rotation.x = Math.PI / 2;
+    laserBeamMesh.position.set(0, 0, 0.5);
+    laserBeamMesh.bakeCurrentTransformIntoVertices();
+    laserBeamMesh.position.set(peqX, peqY, peqZ + 0.035);
+    laserBeamMesh.material = laserMat;
+    laserBeamMesh.parent = root;
+    laserBeamMesh.isPickable = false;
 
-    // 12. "TRUE BODY" CONNECTED OPERATOR GLOVES & FOREARMS
-    const gloveMat = new THREE.MeshStandardMaterial({
-      color: 0x2b2925,
-      roughness: 0.78,
-      metalness: 0.08,
-    });
-    const sleeveMat = new THREE.MeshStandardMaterial({
-      color: 0x3b4238, // Ranger green tactical combat shirt sleeve
-      roughness: 0.85,
-      metalness: 0.05,
-    });
+    const dotMat = new StandardMaterial('laserDotMat', scene);
+    dotMat.disableLighting = true;
+    dotMat.emissiveColor = laserCol.scale(3.5);
 
-    const rightHandGroup = new THREE.Group();
-    const rGlove = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.068, 0.075), gloveMat);
-    rGlove.position.set(0.01, -recH * 0.5 - 0.038, gripMesh.position.z + 0.01);
-    const rArm = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.065, 0.28), sleeveMat);
-    rArm.position.set(0.055, -recH * 0.5 - 0.085, gripMesh.position.z + 0.16);
-    rArm.rotation.y = -0.22;
-    rArm.rotation.x = 0.25;
-    rightHandGroup.add(rGlove, rArm);
-    root.add(rightHandGroup);
+    const laserDotMesh = MeshBuilder.CreateSphere(
+      'laserHitDot',
+      { diameter: 0.032, segments: 8 },
+      scene
+    );
+    laserDotMesh.material = dotMat;
+    laserDotMesh.isPickable = false;
+    laserDotMesh.isVisible = hasLaser;
 
-    const leftHandGroup = new THREE.Group();
-    const lHandZ = isPistol ? gripMesh.position.z - 0.01 : barrelStartZ - 0.14;
-    const lGlove = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.062, 0.082), gloveMat);
+    // 12. "TRUE BODY" OPERATOR TACTICAL GLOVES & SLEEVES
+    const gloveMat = new PBRMaterial('gloveMat', scene);
+    gloveMat.albedoColor = new Color3(0.16, 0.15, 0.13);
+    gloveMat.roughness = 0.78;
+    gloveMat.metallic = 0.08;
+
+    const sleeveMat = new PBRMaterial('sleeveMat', scene);
+    sleeveMat.albedoColor = new Color3(0.22, 0.26, 0.2);
+    sleeveMat.roughness = 0.85;
+    sleeveMat.metallic = 0.05;
+
+    const rightHandGroup = new TransformNode('rightHandGroup', scene);
+    rightHandGroup.parent = root;
+    const rGlove = MeshBuilder.CreateBox(
+      'rGlove',
+      { width: 0.052, height: 0.068, depth: 0.075 },
+      scene
+    );
+    rGlove.position.set(0.01, -recH * 0.5 - 0.038, gripMesh.position.z - 0.01);
+    rGlove.material = gloveMat;
+    rGlove.parent = rightHandGroup;
+    rGlove.isPickable = false;
+
+    const rArm = MeshBuilder.CreateBox(
+      'rArm',
+      { width: 0.065, height: 0.065, depth: 0.28 },
+      scene
+    );
+    rArm.position.set(0.055, -recH * 0.5 - 0.085, gripMesh.position.z - 0.16);
+    rArm.rotation.y = 0.22;
+    rArm.rotation.x = -0.25;
+    rArm.material = sleeveMat;
+    rArm.parent = rightHandGroup;
+    rArm.isPickable = false;
+
+    const leftHandGroup = new TransformNode('leftHandGroup', scene);
+    leftHandGroup.parent = root;
+    const lHandZ = isPistol ? gripMesh.position.z + 0.01 : barrelStartZ + 0.14;
+    const lGlove = MeshBuilder.CreateBox(
+      'lGlove',
+      { width: 0.052, height: 0.062, depth: 0.082 },
+      scene
+    );
     lGlove.position.set(-0.018, -recH * 0.5 - 0.025, lHandZ);
-    const lArm = new THREE.Mesh(new THREE.BoxGeometry(0.064, 0.064, 0.34), sleeveMat);
-    lArm.position.set(-0.095, -recH * 0.5 - 0.095, lHandZ + 0.17);
-    lArm.rotation.y = 0.38;
-    lArm.rotation.x = 0.28;
-    leftHandGroup.add(lGlove, lArm);
-    root.add(leftHandGroup);
+    lGlove.material = gloveMat;
+    lGlove.parent = leftHandGroup;
+    lGlove.isPickable = false;
+
+    const lArm = MeshBuilder.CreateBox(
+      'lArm',
+      { width: 0.064, height: 0.064, depth: 0.34 },
+      scene
+    );
+    lArm.position.set(-0.095, -recH * 0.5 - 0.095, lHandZ - 0.17);
+    lArm.rotation.y = -0.38;
+    lArm.rotation.x = -0.28;
+    lArm.material = sleeveMat;
+    lArm.parent = leftHandGroup;
+    lArm.isPickable = false;
 
     return {
       root,
@@ -456,11 +712,10 @@ export class WeaponModelBuilder {
       rightHandGroup,
       muzzlePoint,
       ejectionPoint,
-      sightAlignLocal: new THREE.Vector3(0, sightAlignY, 0),
+      sightAlignLocal: new Vector3(0, sightAlignY, 0),
       muzzleFlashMesh,
       muzzleFlashLight,
       flashlightSpot,
-      flashlightTarget,
       laserBeamMesh,
       laserDotMesh,
       hasLaser,

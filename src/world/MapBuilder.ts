@@ -1,12 +1,26 @@
-import * as THREE from 'three';
+import {
+  Color3,
+  Color4,
+  DirectionalLight,
+  DynamicTexture,
+  HemisphericLight,
+  Mesh,
+  MeshBuilder,
+  PBRMaterial,
+  PointLight,
+  Scene,
+  StandardMaterial,
+  TransformNode,
+  Vector3,
+} from '@babylonjs/core';
 import { MapId } from '../data/bodycamData';
 
 export interface ReactiveTarget {
   id: string;
-  root: THREE.Group;
-  pivot: THREE.Group;
-  headMesh: THREE.Mesh;
-  bodyMesh: THREE.Mesh;
+  root: TransformNode;
+  pivot: TransformNode;
+  headMesh: Mesh;
+  bodyMesh: Mesh;
   distanceMeters: number;
   laneIndex: number;
   isMoving: boolean;
@@ -21,142 +35,143 @@ export interface ReactiveTarget {
 }
 
 export interface BuiltMap {
-  sceneGroup: THREE.Group;
-  colliders: THREE.Box3[];
-  raycastMeshes: THREE.Object3D[];
+  sceneGroup: TransformNode;
   reactiveTargets: ReactiveTarget[];
-  playerSpawn: THREE.Vector3;
+  playerSpawn: Vector3;
   playerSpawnYaw: number;
-  botWaypoints: THREE.Vector3[];
-  bombSites: { name: string; position: THREE.Vector3 }[];
+  botWaypoints: Vector3[];
+  bombSites: { name: string; position: Vector3 }[];
   surfaceType: 'CONCRETE' | 'WOOD' | 'MUD';
   defaultExposure: number;
 }
 
 export class MapBuilder {
-  private static texCache: Record<string, THREE.CanvasTexture> = {};
+  private static texCache: Record<string, DynamicTexture> = {};
 
-  private static makeProceduralTexture(
+  private static makeDynamicTexture(
+    scene: Scene,
     key: string,
     drawFn: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
-    repeatX = 4,
-    repeatY = 4
-  ): THREE.CanvasTexture {
-    const cacheKey = `${key}_${repeatX}_${repeatY}`;
+    uScale = 4,
+    vScale = 4
+  ): DynamicTexture {
+    const cacheKey = `${key}_${uScale}_${vScale}`;
     if (this.texCache[cacheKey]) return this.texCache[cacheKey];
 
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d')!;
+    const dt = new DynamicTexture(cacheKey, { width: 256, height: 256 }, scene, true);
+    const ctx = dt.getContext() as unknown as CanvasRenderingContext2D;
     drawFn(ctx, 256, 256);
-
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(repeatX, repeatY);
-    this.texCache[cacheKey] = tex;
-    return tex;
+    dt.update();
+    dt.wrapU = DynamicTexture.WRAP_ADDRESSMODE;
+    dt.wrapV = DynamicTexture.WRAP_ADDRESSMODE;
+    dt.uScale = uScale;
+    dt.vScale = vScale;
+    this.texCache[cacheKey] = dt;
+    return dt;
   }
 
-  public static getConcreteTex(rx = 6, ry = 6): THREE.CanvasTexture {
-    return this.makeProceduralTexture(
+  public static getConcreteTex(scene: Scene, u = 8, v = 8): DynamicTexture {
+    return this.makeDynamicTexture(
+      scene,
       'concrete',
       (ctx, w, h) => {
-        ctx.fillStyle = '#3a3d42';
+        ctx.fillStyle = '#3b4046';
         ctx.fillRect(0, 0, w, h);
-        for (let i = 0; i < 4000; i++) {
-          const v = 45 + Math.floor(Math.random() * 35);
-          ctx.fillStyle = `rgb(${v},${v + 2},${v + 5})`;
+        for (let i = 0; i < 4500; i++) {
+          const c = 44 + Math.floor(Math.random() * 34);
+          ctx.fillStyle = `rgb(${c},${c + 2},${c + 5})`;
           ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
         }
-        ctx.strokeStyle = 'rgba(20,22,25,0.45)';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(1, 1, w - 2, h - 2);
+        ctx.strokeStyle = 'rgba(18,20,24,0.55)';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(2, 2, w - 4, h - 4);
       },
-      rx,
-      ry
+      u,
+      v
     );
   }
 
-  public static getPlywoodTex(rx = 2, ry = 2): THREE.CanvasTexture {
-    return this.makeProceduralTexture(
+  public static getPlywoodTex(scene: Scene, u = 2, v = 2): DynamicTexture {
+    return this.makeDynamicTexture(
+      scene,
       'plywood',
       (ctx, w, h) => {
-        ctx.fillStyle = '#7c5d3b';
+        ctx.fillStyle = '#7e5f3d';
         ctx.fillRect(0, 0, w, h);
         for (let y = 0; y < h; y += 3) {
-          const shade = Math.sin(y * 0.08) * 12 + (Math.random() - 0.5) * 10;
-          ctx.fillStyle = `rgb(${124 + shade}, ${93 + shade * 0.8}, ${59 + shade * 0.5})`;
+          const s = Math.sin(y * 0.08) * 14 + (Math.random() - 0.5) * 10;
+          ctx.fillStyle = `rgb(${126 + s}, ${95 + s * 0.8}, ${61 + s * 0.5})`;
           ctx.fillRect(0, y, w, 3);
         }
-        ctx.strokeStyle = 'rgba(40,28,15,0.5)';
+        ctx.strokeStyle = 'rgba(38,26,14,0.6)';
         ctx.lineWidth = 4;
         ctx.strokeRect(2, 2, w - 4, h - 4);
       },
-      rx,
-      ry
+      u,
+      v
     );
   }
 
-  public static getMudTex(rx = 8, ry = 8): THREE.CanvasTexture {
-    return this.makeProceduralTexture(
+  public static getMudTex(scene: Scene, u = 12, v = 12): DynamicTexture {
+    return this.makeDynamicTexture(
+      scene,
       'mud',
       (ctx, w, h) => {
         ctx.fillStyle = '#2d241c';
         ctx.fillRect(0, 0, w, h);
-        for (let i = 0; i < 3500; i++) {
-          const r = 32 + Math.floor(Math.random() * 28);
+        for (let i = 0; i < 4000; i++) {
+          const r = 30 + Math.floor(Math.random() * 28);
           ctx.fillStyle = `rgb(${r + 8},${r},${r - 6})`;
           ctx.fillRect(Math.random() * w, Math.random() * h, 3, 3);
         }
       },
-      rx,
-      ry
+      u,
+      v
     );
   }
 
-  public static getContainerTex(baseHex: string, rx = 2, ry = 1): THREE.CanvasTexture {
-    return this.makeProceduralTexture(
+  public static getContainerTex(scene: Scene, baseHex: string, u = 2, v = 1): DynamicTexture {
+    return this.makeDynamicTexture(
+      scene,
       `container_${baseHex}`,
       (ctx, w, h) => {
         ctx.fillStyle = baseHex;
         ctx.fillRect(0, 0, w, h);
         for (let x = 0; x < w; x += 16) {
-          ctx.fillStyle = 'rgba(0,0,0,0.22)';
+          ctx.fillStyle = 'rgba(0,0,0,0.28)';
           ctx.fillRect(x, 0, 6, h);
-          ctx.fillStyle = 'rgba(255,255,255,0.08)';
+          ctx.fillStyle = 'rgba(255,255,255,0.09)';
           ctx.fillRect(x + 6, 0, 4, h);
         }
       },
-      rx,
-      ry
+      u,
+      v
     );
   }
 
-  public static getTargetSilhouetteTex(isThreat = true): THREE.CanvasTexture {
-    return this.makeProceduralTexture(
-      `target_${isThreat}`,
+  public static getTargetSilhouetteTex(scene: Scene): DynamicTexture {
+    return this.makeDynamicTexture(
+      scene,
+      'targetSilhouette',
       (ctx, w, h) => {
-        ctx.fillStyle = isThreat ? '#181c20' : '#1f3a52';
+        ctx.fillStyle = '#161a20';
         ctx.fillRect(0, 0, w, h);
-        ctx.strokeStyle = '#e5e7eb';
-        ctx.lineWidth = 5;
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 6;
         ctx.strokeRect(8, 8, w - 16, h - 16);
 
-        // Scoring rings on chest
         const cx = w / 2;
         const cy = h * 0.45;
-        [75, 52, 30].forEach((r, idx) => {
+        [76, 52, 28].forEach((r, idx) => {
           ctx.beginPath();
           ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.strokeStyle = idx === 2 ? '#ef4444' : 'rgba(255,255,255,0.45)';
-          ctx.lineWidth = idx === 2 ? 4 : 2;
+          ctx.strokeStyle = idx === 2 ? '#ef4444' : 'rgba(255,255,255,0.5)';
+          ctx.lineWidth = idx === 2 ? 5 : 2.5;
           ctx.stroke();
         });
         ctx.fillStyle = '#ef4444';
         ctx.beginPath();
-        ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+        ctx.arc(cx, cy, 11, 0, Math.PI * 2);
         ctx.fill();
       },
       1,
@@ -164,13 +179,12 @@ export class MapBuilder {
     );
   }
 
-  public static buildMap(mapId: MapId, scene: THREE.Scene): BuiltMap {
-    const sceneGroup = new THREE.Group();
-    const colliders: THREE.Box3[] = [];
-    const raycastMeshes: THREE.Object3D[] = [];
+  public static buildMap(mapId: MapId, scene: Scene): BuiltMap {
+    this.texCache = {};
+    const sceneGroup = new TransformNode(`map_${mapId}`, scene);
     const reactiveTargets: ReactiveTarget[] = [];
-    const botWaypoints: THREE.Vector3[] = [];
-    const bombSites: { name: string; position: THREE.Vector3 }[] = [];
+    const botWaypoints: Vector3[] = [];
+    const bombSites: { name: string; position: Vector3 }[] = [];
 
     const addBox = (
       w: number,
@@ -179,20 +193,50 @@ export class MapBuilder {
       x: number,
       y: number,
       z: number,
-      mat: THREE.Material,
+      mat: PBRMaterial | StandardMaterial,
       hasCollision = true
-    ): THREE.Mesh => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    ): Mesh => {
+      const mesh = MeshBuilder.CreateBox(
+        `worldBox_${x}_${z}`,
+        { width: w, height: h, depth: d },
+        scene
+      );
       mesh.position.set(x, y, z);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      sceneGroup.add(mesh);
-      raycastMeshes.push(mesh);
-      if (hasCollision) {
-        const box = new THREE.Box3().setFromObject(mesh);
-        colliders.push(box);
-      }
+      mesh.material = mat;
+      mesh.parent = sceneGroup;
+      mesh.checkCollisions = hasCollision;
+      mesh.isPickable = true;
+      mesh.metadata = { isWorldGeometry: true };
       return mesh;
+    };
+
+    const addCeilingLightFixture = (
+      x: number,
+      y: number,
+      z: number,
+      col: Color3,
+      intensity = 1.65
+    ) => {
+      const stripMat = new StandardMaterial(`stripMat_${x}_${z}`, scene);
+      stripMat.disableLighting = true;
+      stripMat.emissiveColor = col.scale(2.4); // Triggers HDR Bloom!
+
+      const fixture = MeshBuilder.CreateBox(
+        `lightStrip_${x}_${z}`,
+        { width: 2.2, height: 0.08, depth: 0.35 },
+        scene
+      );
+      fixture.position.set(x, y, z);
+      fixture.material = stripMat;
+      fixture.parent = sceneGroup;
+      fixture.isPickable = false;
+
+      const pt = new PointLight(`ptLight_${x}_${z}`, new Vector3(x, y - 0.25, z), scene);
+      pt.diffuse = col;
+      pt.specular = col;
+      pt.intensity = intensity;
+      pt.range = 32;
+      pt.parent = sceneGroup;
     };
 
     const createReactiveTarget = (
@@ -203,56 +247,76 @@ export class MapBuilder {
       distanceMeters: number,
       laneIndex: number,
       isMoving = false,
-      moveAmp = 2.5,
-      moveSpeed = 1.4,
+      moveAmp = 2.4,
+      moveSpeed = 1.5,
       isDrillTarget = false
     ): ReactiveTarget => {
-      const root = new THREE.Group();
+      const root = new TransformNode(`targetRoot_${id}`, scene);
       root.position.set(x, y, z);
-      sceneGroup.add(root);
+      root.parent = sceneGroup;
 
-      const standMat = new THREE.MeshStandardMaterial({
-        color: 0x2c3035,
-        roughness: 0.5,
-        metalness: 0.7,
-      });
-      const base = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.08, 0.7), standMat);
+      const standMat = new PBRMaterial(`standMat_${id}`, scene);
+      standMat.albedoColor = new Color3(0.2, 0.22, 0.25);
+      standMat.metallic = 0.78;
+      standMat.roughness = 0.38;
+
+      const base = MeshBuilder.CreateBox(
+        `tBase_${id}`,
+        { width: 0.7, height: 0.08, depth: 0.7 },
+        scene
+      );
       base.position.set(0, 0.04, 0);
-      root.add(base);
+      base.material = standMat;
+      base.parent = root;
+      base.isPickable = false;
 
-      // Distance marker plate on base
-      const pivot = new THREE.Group();
+      const pivot = new TransformNode(`tPivot_${id}`, scene);
       pivot.position.set(0, 0.08, 0);
-      root.add(pivot);
+      pivot.parent = root;
 
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.9, 0.08), standMat);
+      const post = MeshBuilder.CreateBox(
+        `tPost_${id}`,
+        { width: 0.08, height: 0.9, depth: 0.08 },
+        scene
+      );
       post.position.set(0, 0.45, 0);
-      pivot.add(post);
+      post.material = standMat;
+      post.parent = pivot;
+      post.isPickable = false;
 
-      const torsoMat = new THREE.MeshStandardMaterial({
-        map: this.getTargetSilhouetteTex(true),
-        roughness: 0.4,
-        metalness: 0.6,
-      });
-      const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.74, 0.05), torsoMat);
+      const torsoMat = new PBRMaterial(`torsoMat_${id}`, scene);
+      torsoMat.albedoTexture = this.getTargetSilhouetteTex(scene);
+      torsoMat.metallic = 0.55;
+      torsoMat.roughness = 0.35;
+
+      const bodyMesh = MeshBuilder.CreateBox(
+        `tBody_${id}`,
+        { width: 0.56, height: 0.76, depth: 0.05 },
+        scene
+      );
       bodyMesh.position.set(0, 1.12, 0);
-      bodyMesh.userData = { targetId: id, hitZone: 'BODY' };
-      pivot.add(bodyMesh);
-      raycastMeshes.push(bodyMesh);
+      bodyMesh.material = torsoMat;
+      bodyMesh.parent = pivot;
+      bodyMesh.isPickable = true;
+      bodyMesh.metadata = { targetId: id, hitZone: 'BODY' };
 
-      const headMat = new THREE.MeshStandardMaterial({
-        color: 0xef4444,
-        roughness: 0.35,
-        metalness: 0.7,
-      });
-      const headMesh = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.26, 0.05), headMat);
-      headMesh.position.set(0, 1.64, 0);
-      headMesh.userData = { targetId: id, hitZone: 'HEAD' };
-      pivot.add(headMesh);
-      raycastMeshes.push(headMesh);
+      const headMat = new StandardMaterial(`headMat_${id}`, scene);
+      headMat.diffuseColor = new Color3(0.95, 0.22, 0.22);
+      headMat.emissiveColor = new Color3(0.65, 0.08, 0.08); // Subtle glow so headplate is readable downrange!
+
+      const headMesh = MeshBuilder.CreateBox(
+        `tHead_${id}`,
+        { width: 0.25, height: 0.26, depth: 0.05 },
+        scene
+      );
+      headMesh.position.set(0, 1.65, 0);
+      headMesh.material = headMat;
+      headMesh.parent = pivot;
+      headMesh.isPickable = true;
+      headMesh.metadata = { targetId: id, hitZone: 'HEAD' };
 
       if (isDrillTarget) {
-        pivot.rotation.x = -Math.PI / 2;
+        pivot.rotation.x = Math.PI / 2;
       }
 
       const rt: ReactiveTarget = {
@@ -279,104 +343,101 @@ export class MapBuilder {
 
     if (mapId === 'SHOOTING_RANGE') {
       // ==================== MAP 1: v0.8 SHOOTING RANGE & CQB KILLHOUSE HUB ====================
-      scene.background = new THREE.Color(0x11151a);
-      scene.fog = new THREE.FogExp2(0x11151a, 0.011);
+      scene.clearColor = new Color4(0.05, 0.065, 0.085, 1.0);
+      scene.fogMode = Scene.FOGMODE_EXP2;
+      scene.fogColor = new Color3(0.05, 0.065, 0.085);
+      scene.fogDensity = 0.01;
 
-      const floorMat = new THREE.MeshStandardMaterial({
-        map: this.getConcreteTex(18, 24),
-        roughness: 0.65,
-        metalness: 0.15,
-      });
-      const wallMat = new THREE.MeshStandardMaterial({
-        map: this.getConcreteTex(10, 4),
-        color: 0x777d84,
-        roughness: 0.75,
-      });
-      const plywoodMat = new THREE.MeshStandardMaterial({
-        map: this.getPlywoodTex(2, 2),
-        roughness: 0.7,
-      });
-      const boothMat = new THREE.MeshStandardMaterial({
-        color: 0x22262b,
-        roughness: 0.45,
-        metalness: 0.6,
-      });
-      const accentOrangeMat = new THREE.MeshStandardMaterial({
-        color: 0xd97706,
-        roughness: 0.5,
-      });
+      const floorMat = new PBRMaterial('rangeFloor', scene);
+      floorMat.albedoTexture = this.getConcreteTex(scene, 18, 24);
+      floorMat.metallic = 0.25;
+      floorMat.roughness = 0.42; // Polished tactical concrete with specular highlights
 
-      // Main Floor (covers Range on left x:[-16..10] and CQB Killhouse on right x:[10..38])
-      const floor = new THREE.Mesh(new THREE.PlaneGeometry(68, 105), floorMat);
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.set(10, 0, -32);
-      floor.receiveShadow = true;
-      sceneGroup.add(floor);
-      raycastMeshes.push(floor);
+      const wallMat = new PBRMaterial('rangeWall', scene);
+      wallMat.albedoTexture = this.getConcreteTex(scene, 10, 4);
+      wallMat.albedoColor = new Color3(0.68, 0.72, 0.76);
+      wallMat.metallic = 0.12;
+      wallMat.roughness = 0.68;
 
-      // Ceiling over Range Lounge & Firing Booths
-      addBox(64, 0.4, 24, 10, 6.2, 4, wallMat, false);
+      const plywoodMat = new PBRMaterial('plywoodMat', scene);
+      plywoodMat.albedoTexture = this.getPlywoodTex(scene, 2, 2);
+      plywoodMat.metallic = 0.05;
+      plywoodMat.roughness = 0.65;
+
+      const boothMat = new PBRMaterial('boothMat', scene);
+      boothMat.albedoColor = new Color3(0.14, 0.16, 0.19);
+      boothMat.metallic = 0.72;
+      boothMat.roughness = 0.35;
+
+      const accentAmberMat = new StandardMaterial('accentAmber', scene);
+      accentAmberMat.diffuseColor = new Color3(0.95, 0.58, 0.08);
+      accentAmberMat.emissiveColor = new Color3(1.4, 0.72, 0.1); // Glowing range distance strips!
+
+      // Main Floor (+Z is North downrange, X:[-16..10] is Range, X:[10..38] is CQB Killhouse)
+      const floor = MeshBuilder.CreateGround(
+        'floor',
+        { width: 68, height: 110 },
+        scene
+      );
+      floor.position.set(10, 0, 32);
+      floor.material = floorMat;
+      floor.parent = sceneGroup;
+      floor.checkCollisions = true;
+      floor.isPickable = true;
+      floor.metadata = { isWorldGeometry: true };
+
+      // Ceiling over Range Lounge & Firing Line
+      addBox(64, 0.4, 24, 10, 6.2, -4, wallMat, false);
 
       // Outer Perimeter Walls
-      addBox(0.6, 6.5, 102, -16, 3.25, -32, wallMat); // West wall
-      addBox(0.6, 6.5, 102, 38, 3.25, -32, wallMat); // East wall
-      addBox(55, 6.5, 0.6, 11, 3.25, 14, wallMat); // South back wall behind Armory lounge
-      addBox(55, 6.5, 0.6, 11, 3.25, -82, wallMat); // North 75m backstop berm
+      addBox(0.6, 6.5, 106, -16, 3.25, 32, wallMat);
+      addBox(0.6, 6.5, 106, 38, 3.25, 32, wallMat);
+      addBox(55, 6.5, 0.6, 11, 3.25, -14, wallMat);
+      addBox(55, 6.5, 0.6, 11, 3.25, 82, wallMat);
 
-      // Divider wall between Firing Lanes (x < 9) and CQB Killhouse Wing (x > 9) with wide breach doorway at z = 4..9
-      addBox(0.5, 5.5, 76, 9, 2.75, -42, wallMat);
+      // Divider wall between Firing Lanes (x < 9) and CQB Killhouse Wing (x > 9) with breach doorway at z = -9..-2
+      addBox(0.5, 5.5, 76, 9, 2.75, 42, wallMat);
+      // Glowing Amber Breach Frame indicating Killhouse Entrance on the right!
+      addBox(0.6, 3.2, 0.25, 9, 1.6, 3.8, accentAmberMat, false);
 
-      // Firing Line Counter & Dividers at z = 0 (with walkthrough gate on left x = -13.5)
-      addBox(19.5, 1.05, 0.7, -1, 0.52, 0, boothMat); // Waist-high shooting bench
-      // Lane dividers
-      [-11, -6, -1, 4, 8.8].forEach((lx) => {
-        addBox(0.15, 2.6, 2.2, lx, 1.3, 0.4, boothMat);
+      // Firing Line Counter at z = 0 (with open walkthrough gate on left & right)
+      addBox(16.5, 1.0, 0.7, -1.5, 0.5, 0, boothMat);
+      [-10, -5.5, -1, 3.5, 8.2].forEach((lx) => {
+        addBox(0.14, 2.6, 2.2, lx, 1.3, -0.4, boothMat);
       });
 
-      // Armory Weapon Rack & Briefing Table in Lounge behind firing line (z = 6..12)
-      addBox(8, 0.9, 1.4, -3, 0.45, 9.5, plywoodMat);
-      addBox(12, 2.8, 0.3, -3, 1.4, 13.4, boothMat);
-
-      // Distance Markers on Range Floor (10m, 25m, 50m, 75m)
-      [-10, -25, -50, -75].forEach((mz) => {
-        addBox(24, 0.03, 0.25, -3.5, 0.015, mz, accentOrangeMat, false);
+      // Glowing Distance Marker Strips Downrange (+10m, +25m, +50m, +75m)
+      [10, 25, 50, 75].forEach((mz) => {
+        addBox(23, 0.03, 0.22, -3.5, 0.015, mz, accentAmberMat, false);
       });
 
-      // Populate Calibrated Reactive Steel Targets across the 4 Lanes!
-      // Lane 1 (x = -8.5): 10m & 25m CQB Precision
-      createReactiveTarget('t_10m_L1', -8.5, 0, -10, 10, 1, false);
-      createReactiveTarget('t_20m_L1', -9.8, 0, -20, 20, 1, false);
+      // Populate Calibrated Reactive Steel Targets (+Z downrange)
+      createReactiveTarget('t_10m_L1', -8.2, 0, 10, 10, 1, false);
+      createReactiveTarget('t_20m_L1', -9.4, 0, 20, 20, 1, false);
+      createReactiveTarget('t_15m_move', -3.2, 0, 15, 15, 2, true, 2.2, 1.65);
+      createReactiveTarget('t_25m_L2', -3.2, 0, 25, 25, 2, false);
+      createReactiveTarget('t_28m_move', 1.6, 0, 28, 28, 3, true, 2.8, 1.35);
+      createReactiveTarget('t_50m_L3', 1.6, 0, 50, 50, 3, false);
+      createReactiveTarget('t_40m_L4', 6.0, 0, 40, 40, 4, false);
+      createReactiveTarget('t_75m_L4', 6.0, 0, 75, 75, 4, false);
 
-      // Lane 2 (x = -3.5): 15m Moving Lateral Target & 25m Standard
-      createReactiveTarget('t_15m_move', -3.5, 0, -15, 15, 2, true, 2.2, 1.65);
-      createReactiveTarget('t_25m_L2', -3.5, 0, -25, 25, 2, false);
-
-      // Lane 3 (x = 1.5): 25m Moving & 50m Mid-Range Marksman
-      createReactiveTarget('t_28m_move', 1.5, 0, -28, 28, 3, true, 2.8, 1.35);
-      createReactiveTarget('t_50m_L3', 1.5, 0, -50, 50, 3, false);
-
-      // Lane 4 (x = 6.2): 50m & 75m Long-Range Sniper Calibration
-      createReactiveTarget('t_40m_L4', 6.2, 0, -40, 40, 4, false);
-      createReactiveTarget('t_75m_L4', 6.2, 0, -75, 75, 4, false);
-
-      // Timed Reflex Drill Pop-Up Targets (scattered from 8m to 32m)
-      const drillCoords = [
-        [-10.5, -8],
-        [-6.2, -12],
-        [-1.0, -11],
-        [4.2, -13],
-        [-7.5, -18],
-        [-2.2, -22],
-        [3.5, -20],
-        [6.8, -26],
-      ];
-      drillCoords.forEach(([dx, dz], idx) => {
+      // 30s Reflex Drill Pop-Up Targets
+      [
+        [-9.8, 8],
+        [-5.8, 12],
+        [-1.0, 11],
+        [4.0, 13],
+        [-7.2, 18],
+        [-2.2, 22],
+        [3.4, 20],
+        [6.4, 26],
+      ].forEach(([dx, dz], idx) => {
         createReactiveTarget(
           `drill_${idx}`,
           dx,
           0,
           dz,
-          Math.abs(dz),
+          dz,
           0,
           idx % 3 === 0,
           1.4,
@@ -385,70 +446,163 @@ export class MapBuilder {
         );
       });
 
-      // ==================== CONNECTED CQB KILLHOUSE BREACHING WING (x: 10..36, z: 10..-65) ====================
-      // Plywood rooms, angled corners for Q/E leaning, cover crates, and AI bot patrol routes!
-      addBox(8, 3.4, 0.35, 14, 1.7, -4, plywoodMat);
-      addBox(8, 3.4, 0.35, 28, 1.7, -4, plywoodMat);
+      // ==================== CONNECTED CQB BREACHING KILLHOUSE WING (x: 10..36, z: 4..65) ====================
+      addBox(8, 3.4, 0.35, 14, 1.7, 5, plywoodMat);
+      addBox(8, 3.4, 0.35, 28, 1.7, 5, plywoodMat);
+      addBox(0.35, 3.4, 14, 21, 1.7, 14, plywoodMat);
+      addBox(9, 3.4, 0.35, 15, 1.7, 18, plywoodMat);
+      addBox(9, 3.4, 0.35, 31, 1.7, 18, plywoodMat);
 
-      addBox(0.35, 3.4, 14, 21, 1.7, -14, plywoodMat);
-      addBox(9, 3.4, 0.35, 15, 1.7, -18, plywoodMat);
-      addBox(9, 3.4, 0.35, 31, 1.7, -18, plywoodMat);
+      addBox(1.8, 1.3, 1.8, 15, 0.65, 10, boothMat);
+      addBox(2.2, 1.4, 1.4, 28, 0.7, 12, plywoodMat);
+      addBox(1.8, 1.3, 1.8, 18, 0.65, 26, boothMat);
+      addBox(2.4, 2.8, 2.4, 27, 1.4, 28, plywoodMat);
+      addBox(9, 3.4, 0.35, 16, 1.7, 35, plywoodMat);
+      addBox(9, 3.4, 0.35, 30, 1.7, 35, plywoodMat);
 
-      // Cover crates inside Killhouse
-      addBox(1.8, 1.3, 1.8, 15, 0.65, -10, accentOrangeMat);
-      addBox(2.2, 1.4, 1.4, 28, 0.7, -12, boothMat);
-      addBox(1.8, 1.3, 1.8, 18, 0.65, -26, accentOrangeMat);
-      addBox(2.4, 2.8, 2.4, 27, 1.4, -28, plywoodMat);
-      addBox(9, 3.4, 0.35, 16, 1.7, -35, plywoodMat);
-      addBox(9, 3.4, 0.35, 30, 1.7, -35, plywoodMat);
-      addBox(2.0, 1.3, 2.0, 23, 0.65, -44, boothMat);
+      // Studio Lighting & HDR Ceiling Fixtures
+      const hemi = new HemisphericLight('hemi', new Vector3(0, 1, 0), scene);
+      hemi.intensity = 0.65;
+      hemi.groundColor = new Color3(0.18, 0.2, 0.24);
+      hemi.parent = sceneGroup;
 
-      // Lighting
-      const amb = new THREE.AmbientLight(0xdbeafe, 0.65);
-      sceneGroup.add(amb);
+      addCeilingLightFixture(-4, 5.9, -2, new Color3(1.0, 0.92, 0.8), 1.4);
+      addCeilingLightFixture(4, 5.9, -2, new Color3(1.0, 0.92, 0.8), 1.4);
+      addCeilingLightFixture(-2, 7.5, 16, new Color3(0.85, 0.94, 1.0), 1.5);
+      addCeilingLightFixture(-2, 7.5, 38, new Color3(0.85, 0.94, 1.0), 1.4);
+      addCeilingLightFixture(22, 5.9, 12, new Color3(1.0, 0.86, 0.68), 1.5);
+      addCeilingLightFixture(22, 5.9, 30, new Color3(1.0, 0.86, 0.68), 1.5);
 
-      const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.25);
-      dirLight.position.set(12, 28, 10);
-      dirLight.castShadow = true;
-      sceneGroup.add(dirLight);
-
-      // Warm industrial spot lights over firing line & killhouse
-      [
-        [-4, 5.5, 2],
-        [4, 5.5, 2],
-        [-3, 8, -22],
-        [22, 5.5, -12],
-        [22, 5.5, -32],
-      ].forEach(([lx, ly, lz]) => {
-        const pt = new THREE.PointLight(0xffedd5, 1.4, 28, 1.5);
-        pt.position.set(lx, ly, lz);
-        sceneGroup.add(pt);
-      });
-
-      // Bot Waypoints in the CQB Killhouse Wing & Downrange
       botWaypoints.push(
-        new THREE.Vector3(15, 0, -8),
-        new THREE.Vector3(29, 0, -9),
-        new THREE.Vector3(16, 0, -22),
-        new THREE.Vector3(29, 0, -23),
-        new THREE.Vector3(23, 0, -31),
-        new THREE.Vector3(15, 0, -40),
-        new THREE.Vector3(30, 0, -42),
-        new THREE.Vector3(22, 0, -15)
+        new Vector3(15, 0, 9),
+        new Vector3(29, 0, 9),
+        new Vector3(16, 0, 22),
+        new Vector3(29, 0, 23),
+        new Vector3(23, 0, 31),
+        new Vector3(15, 0, 40),
+        new Vector3(30, 0, 42),
+        new Vector3(22, 0, 15)
       );
 
       bombSites.push(
-        { name: 'KILLHOUSE ROOM A', position: new THREE.Vector3(16, 0, -14) },
-        { name: 'KILLHOUSE BREACH B', position: new THREE.Vector3(28, 0, -30) }
+        { name: 'KILLHOUSE ROOM A', position: new Vector3(16, 0, 14) },
+        { name: 'KILLHOUSE BREACH B', position: new Vector3(28, 0, 30) }
       );
 
       return {
         sceneGroup,
-        colliders,
-        raycastMeshes,
         reactiveTargets,
-        playerSpawn: new THREE.Vector3(-2.5, 0, 3.2),
-        playerSpawnYaw: 0, // Facing North (-Z) toward firing lanes
+        playerSpawn: new Vector3(-2.5, 0, -3.2),
+        playerSpawnYaw: 0, // Facing +Z North toward range targets!
+        botWaypoints,
+        bombSites,
+        surfaceType: 'CONCRETE',
+        defaultExposure: 1.16,
+      };
+    }
+
+    if (mapId === 'CQB_POWERGUN') {
+      // ==================== MAP 2: CQB POWERGUN WAREHOUSE ====================
+      scene.clearColor = new Color4(0.03, 0.04, 0.055, 1.0);
+      scene.fogMode = Scene.FOGMODE_EXP2;
+      scene.fogColor = new Color3(0.03, 0.04, 0.055);
+      scene.fogDensity = 0.02;
+
+      const floorMat = new PBRMaterial('cqbFloor', scene);
+      floorMat.albedoTexture = this.getConcreteTex(scene, 16, 16);
+      floorMat.metallic = 0.3;
+      floorMat.roughness = 0.45;
+
+      const wallMat = new PBRMaterial('cqbWall', scene);
+      wallMat.albedoTexture = this.getConcreteTex(scene, 12, 4);
+      wallMat.albedoColor = new Color3(0.45, 0.49, 0.54);
+      wallMat.metallic = 0.15;
+      wallMat.roughness = 0.72;
+
+      const blueContainerMat = new PBRMaterial('blueCont', scene);
+      blueContainerMat.albedoTexture = this.getContainerTex(scene, '#1e3a5f');
+      blueContainerMat.metallic = 0.65;
+      blueContainerMat.roughness = 0.42;
+
+      const redContainerMat = new PBRMaterial('redCont', scene);
+      redContainerMat.albedoTexture = this.getContainerTex(scene, '#6b2121');
+      redContainerMat.metallic = 0.65;
+      redContainerMat.roughness = 0.42;
+
+      const plywoodMat = new PBRMaterial('cqbPlywood', scene);
+      plywoodMat.albedoTexture = this.getPlywoodTex(scene, 2, 2);
+      plywoodMat.metallic = 0.05;
+      plywoodMat.roughness = 0.68;
+
+      const floor = MeshBuilder.CreateGround('cqbGround', { width: 56, height: 56 }, scene);
+      floor.material = floorMat;
+      floor.parent = sceneGroup;
+      floor.checkCollisions = true;
+      floor.isPickable = true;
+      floor.metadata = { isWorldGeometry: true };
+
+      addBox(56, 0.5, 56, 0, 8.5, 0, wallMat, false);
+      addBox(56, 8.5, 0.6, 0, 4.25, -28, wallMat);
+      addBox(56, 8.5, 0.6, 0, 4.25, 28, wallMat);
+      addBox(0.6, 8.5, 56, -28, 4.25, 0, wallMat);
+      addBox(0.6, 8.5, 56, 28, 4.25, 0, wallMat);
+
+      addBox(3.2, 3.0, 8.5, -12, 1.5, 10, blueContainerMat);
+      addBox(3.2, 3.0, 8.5, 12, 1.5, -10, redContainerMat);
+      addBox(8.5, 3.0, 3.2, -10, 1.5, -12, redContainerMat);
+      addBox(8.5, 3.0, 3.2, 11, 1.5, 13, blueContainerMat);
+
+      addBox(8, 3.4, 0.35, -3.5, 1.7, 4.5, plywoodMat);
+      addBox(8, 3.4, 0.35, 3.5, 1.7, -4.5, plywoodMat);
+      addBox(0.35, 3.4, 7, -6.5, 1.7, -1, plywoodMat);
+      addBox(0.35, 3.4, 7, 6.5, 1.7, 1, plywoodMat);
+
+      [
+        [-5, 12],
+        [5, -12],
+        [-15, 0],
+        [15, 0],
+        [0, 0],
+      ].forEach(([cx, cz]) => {
+        addBox(2.2, 1.25, 1.2, cx, 0.625, cz, plywoodMat);
+      });
+
+      createReactiveTarget('cqb_t1', -6, 0, 24, 24, 1, false);
+      createReactiveTarget('cqb_t2', 6, 0, 24, 24, 2, true, 2.5, 1.5);
+
+      const hemi = new HemisphericLight('cqbHemi', new Vector3(0, 1, 0), scene);
+      hemi.intensity = 0.42;
+      hemi.groundColor = new Color3(0.1, 0.12, 0.16);
+      hemi.parent = sceneGroup;
+
+      addCeilingLightFixture(0, 7.8, 0, new Color3(1.0, 0.84, 0.62), 1.8);
+      addCeilingLightFixture(-14, 7.8, 14, new Color3(0.68, 0.85, 1.0), 1.3);
+      addCeilingLightFixture(14, 7.8, -14, new Color3(1.0, 0.72, 0.48), 1.4);
+      addCeilingLightFixture(-14, 7.8, -14, new Color3(0.8, 0.9, 1.0), 1.2);
+      addCeilingLightFixture(14, 7.8, 14, new Color3(1.0, 0.84, 0.62), 1.3);
+
+      botWaypoints.push(
+        new Vector3(-16, 0, 8),
+        new Vector3(16, 0, -8),
+        new Vector3(0, 0, 9),
+        new Vector3(0, 0, -9),
+        new Vector3(-9, 0, -6),
+        new Vector3(9, 0, 6),
+        new Vector3(-18, 0, -14),
+        new Vector3(18, 0, 14),
+        new Vector3(0, 0, 20)
+      );
+
+      bombSites.push(
+        { name: 'SITE A (KILLHOUSE CENTER)', position: new Vector3(0, 0, 0) },
+        { name: 'SITE B (NORTH CONTAINER)', position: new Vector3(8, 0, 16) }
+      );
+
+      return {
+        sceneGroup,
+        reactiveTargets,
+        playerSpawn: new Vector3(0, 0, -22),
+        playerSpawnYaw: 0,
         botWaypoints,
         bombSites,
         surfaceType: 'CONCRETE',
@@ -456,262 +610,103 @@ export class MapBuilder {
       };
     }
 
-    if (mapId === 'CQB_POWERGUN') {
-      // ==================== MAP 2: CQB POWERGUN WAREHOUSE ====================
-      scene.background = new THREE.Color(0x0b0e13);
-      scene.fog = new THREE.FogExp2(0x0b0e13, 0.022);
-
-      const floorMat = new THREE.MeshStandardMaterial({
-        map: this.getConcreteTex(16, 16),
-        color: 0x555b62,
-        roughness: 0.7,
-      });
-      const wallMat = new THREE.MeshStandardMaterial({
-        map: this.getConcreteTex(12, 4),
-        color: 0x3f444a,
-        roughness: 0.8,
-      });
-      const blueContainerMat = new THREE.MeshStandardMaterial({
-        map: this.getContainerTex('#1e3a5f'),
-        roughness: 0.5,
-        metalness: 0.55,
-      });
-      const redContainerMat = new THREE.MeshStandardMaterial({
-        map: this.getContainerTex('#6b2121'),
-        roughness: 0.5,
-        metalness: 0.55,
-      });
-      const plywoodMat = new THREE.MeshStandardMaterial({
-        map: this.getPlywoodTex(2, 2),
-        roughness: 0.72,
-      });
-
-      const floor = new THREE.Mesh(new THREE.PlaneGeometry(56, 56), floorMat);
-      floor.rotation.x = -Math.PI / 2;
-      floor.receiveShadow = true;
-      sceneGroup.add(floor);
-      raycastMeshes.push(floor);
-
-      // Warehouse Ceiling
-      addBox(56, 0.5, 56, 0, 8.5, 0, wallMat, false);
-
-      // Outer Walls
-      addBox(56, 8.5, 0.6, 0, 4.25, -28, wallMat);
-      addBox(56, 8.5, 0.6, 0, 4.25, 28, wallMat);
-      addBox(0.6, 8.5, 56, -28, 4.25, 0, wallMat);
-      addBox(0.6, 8.5, 56, 28, 4.25, 0, wallMat);
-
-      // Shipping Containers & Central Plywood Killhouse
-      addBox(3.2, 3.0, 8.5, -12, 1.5, -10, blueContainerMat);
-      addBox(3.2, 3.0, 8.5, 12, 1.5, 10, redContainerMat);
-      addBox(8.5, 3.0, 3.2, -10, 1.5, 12, redContainerMat);
-      addBox(8.5, 3.0, 3.2, 11, 1.5, -13, blueContainerMat);
-
-      // Central CQB Plywood Room with doorway gaps
-      addBox(8, 3.4, 0.35, -3.5, 1.7, -4.5, plywoodMat);
-      addBox(8, 3.4, 0.35, 3.5, 1.7, 4.5, plywoodMat);
-      addBox(0.35, 3.4, 7, -6.5, 1.7, 1, plywoodMat);
-      addBox(0.35, 3.4, 7, 6.5, 1.7, -1, plywoodMat);
-
-      // Concrete Pillars & Waist-high Tactical Barricades
-      [
-        [-18, -18],
-        [18, -18],
-        [-18, 18],
-        [18, 18],
-        [0, -16],
-        [0, 16],
-      ].forEach(([px, pz]) => {
-        addBox(1.8, 8.5, 1.8, px, 4.25, pz, wallMat);
-      });
-
-      [
-        [-5, 0, -12],
-        [5, 0, 12],
-        [-15, 0, 0],
-        [15, 0, 0],
-        [0, 0, 0],
-      ].forEach(([cx, _, cz]) => {
-        addBox(2.2, 1.25, 1.2, cx, 0.625, cz, plywoodMat);
-      });
-
-      // Practice Silhouette Targets in North Alcove
-      createReactiveTarget('cqb_t1', -6, 0, -24, 24, 1, false);
-      createReactiveTarget('cqb_t2', 6, 0, -24, 24, 2, true, 2.5, 1.5);
-
-      // Moody Warehouse Lighting (Flashlight [F] makes a huge difference in dark corners!)
-      const amb = new THREE.AmbientLight(0x8fa8c8, 0.38);
-      sceneGroup.add(amb);
-
-      [
-        [0, 7.2, 0, 0xffd8a8, 1.6],
-        [-14, 7.2, -14, 0xa8d0ff, 1.1],
-        [14, 7.2, 14, 0xffb878, 1.2],
-        [-14, 7.2, 14, 0xd8e8ff, 0.9],
-        [14, 7.2, -14, 0xffd8a8, 1.1],
-      ].forEach(([lx, ly, lz, col, inten]) => {
-        const pt = new THREE.PointLight(col, inten, 28, 1.6);
-        pt.position.set(lx, ly, lz);
-        sceneGroup.add(pt);
-      });
-
-      botWaypoints.push(
-        new THREE.Vector3(-16, 0, -8),
-        new THREE.Vector3(16, 0, 8),
-        new THREE.Vector3(0, 0, -9),
-        new THREE.Vector3(0, 0, 9),
-        new THREE.Vector3(-9, 0, 6),
-        new THREE.Vector3(9, 0, -6),
-        new THREE.Vector3(-18, 0, 14),
-        new THREE.Vector3(18, 0, -14),
-        new THREE.Vector3(0, 0, -20)
-      );
-
-      bombSites.push(
-        { name: 'SITE A (KILLHOUSE CENTER)', position: new THREE.Vector3(0, 0, 0) },
-        { name: 'SITE B (NORTH CONTAINER)', position: new THREE.Vector3(8, 0, -16) }
-      );
-
-      return {
-        sceneGroup,
-        colliders,
-        raycastMeshes,
-        reactiveTargets,
-        playerSpawn: new THREE.Vector3(0, 0, 22),
-        playerSpawnYaw: 0,
-        botWaypoints,
-        bombSites,
-        surfaceType: 'CONCRETE',
-        defaultExposure: 1.05,
-      };
-    }
-
     // ==================== MAP 3: TRENCHES (v0.8 LOCKED & LOADED OUTDOOR BATTLEFIELD) ====================
-    scene.background = new THREE.Color(0x525b63);
-    scene.fog = new THREE.FogExp2(0x525b63, 0.018);
+    scene.clearColor = new Color4(0.32, 0.36, 0.4, 1.0);
+    scene.fogMode = Scene.FOGMODE_EXP2;
+    scene.fogColor = new Color3(0.32, 0.36, 0.4);
+    scene.fogDensity = 0.016;
 
-    const mudMat = new THREE.MeshStandardMaterial({
-      map: this.getMudTex(20, 20),
-      roughness: 0.9,
-      metalness: 0.05,
-    });
-    const woodMat = new THREE.MeshStandardMaterial({
-      map: this.getPlywoodTex(3, 1),
-      color: 0x5c442c,
-      roughness: 0.85,
-    });
-    const stoneMat = new THREE.MeshStandardMaterial({
-      map: this.getConcreteTex(8, 4),
-      color: 0x62666a,
-      roughness: 0.85,
-    });
-    const sandbagMat = new THREE.MeshStandardMaterial({
-      color: 0x786f56,
-      roughness: 0.9,
-    });
+    const mudMat = new PBRMaterial('mudMat', scene);
+    mudMat.albedoTexture = this.getMudTex(scene, 20, 20);
+    mudMat.metallic = 0.08;
+    mudMat.roughness = 0.78;
 
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(76, 76), mudMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    sceneGroup.add(floor);
-    raycastMeshes.push(floor);
+    const woodMat = new PBRMaterial('trenchWood', scene);
+    woodMat.albedoTexture = this.getPlywoodTex(scene, 3, 1);
+    woodMat.albedoColor = new Color3(0.55, 0.42, 0.28);
+    woodMat.metallic = 0.05;
+    woodMat.roughness = 0.82;
 
-    // Outer Minefield / Berm Perimeter
+    const stoneMat = new PBRMaterial('churchStone', scene);
+    stoneMat.albedoTexture = this.getConcreteTex(scene, 8, 4);
+    stoneMat.albedoColor = new Color3(0.58, 0.6, 0.64);
+    stoneMat.metallic = 0.1;
+    stoneMat.roughness = 0.85;
+
+    const sandbagMat = new PBRMaterial('sandbagMat', scene);
+    sandbagMat.albedoColor = new Color3(0.48, 0.44, 0.34);
+    sandbagMat.metallic = 0.02;
+    sandbagMat.roughness = 0.9;
+
+    const floor = MeshBuilder.CreateGround('trenchGround', { width: 76, height: 76 }, scene);
+    floor.material = mudMat;
+    floor.parent = sceneGroup;
+    floor.checkCollisions = true;
+    floor.isPickable = true;
+    floor.metadata = { isWorldGeometry: true };
+
     addBox(76, 4.5, 1.5, 0, 2.25, -38, mudMat);
     addBox(76, 4.5, 1.5, 0, 2.25, 38, mudMat);
     addBox(1.5, 4.5, 76, -38, 2.25, 0, mudMat);
     addBox(1.5, 4.5, 76, 38, 2.25, 0, mudMat);
 
-    // Wooden Duckboard Walkways in Trench Floor
-    [-18, 0, 18].forEach((tz) => {
-      addBox(42, 0.06, 1.8, 0, 0.03, tz, woodMat, false);
-    });
-
-    // Fortified Trench Walls & Sandbag Parapets
-    const trenchBlocks = [
-      // South Trench Line
-      [-14, 15, 12, 2.1, 1.6],
-      [14, 15, 12, 2.1, 1.6],
-      // Mid Trench Bunkers
-      [-18, 0, 6, 2.3, 8],
-      [18, 0, 6, 2.3, 8],
-      // North Trench Line
+    [
       [-14, -15, 12, 2.1, 1.6],
       [14, -15, 12, 2.1, 1.6],
-    ];
-    trenchBlocks.forEach(([bx, bz, bw, bh, bd]) => {
+      [-18, 0, 6, 2.3, 8],
+      [18, 0, 6, 2.3, 8],
+      [-14, 15, 12, 2.1, 1.6],
+      [14, 15, 12, 2.1, 1.6],
+    ].forEach(([bx, bz, bw, bh, bd]) => {
       addBox(bw, bh, bd, bx, bh * 0.5, bz, woodMat);
       addBox(bw * 0.9, 0.55, bd * 0.8, bx, bh + 0.25, bz, sandbagMat);
     });
 
-    // Central Ruined Church Sanctuary & Bell Tower Remnant (Signature v0.8 Trenches landmark!)
-    addBox(9, 4.2, 0.7, -4.5, 2.1, -5, stoneMat);
-    addBox(9, 4.2, 0.7, 4.5, 2.1, 5, stoneMat);
-    addBox(0.7, 4.2, 8, -8.5, 2.1, 1, stoneMat);
-    addBox(0.7, 4.2, 8, 8.5, 2.1, -1, stoneMat);
-    // Ruined Bell Tower Column
-    addBox(2.8, 9.5, 2.8, -7.5, 4.75, -4.5, stoneMat);
+    // Central Ruined Church Sanctuary & Bell Tower
+    addBox(9, 4.2, 0.7, -4.5, 2.1, 5, stoneMat);
+    addBox(9, 4.2, 0.7, 4.5, 2.1, -5, stoneMat);
+    addBox(0.7, 4.2, 8, -8.5, 2.1, -1, stoneMat);
+    addBox(0.7, 4.2, 8, 8.5, 2.1, 1, stoneMat);
+    addBox(2.8, 9.5, 2.8, -7.5, 4.75, 4.5, stoneMat);
 
-    // Dead Battlefield Trees around edges
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2b2118, roughness: 0.95 });
-    [
-      [-26, -24],
-      [25, -22],
-      [-28, 12],
-      [27, 16],
-      [-22, 26],
-      [24, 25],
-      [0, -28],
-    ].forEach(([tx, tz]) => {
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.42, 6.5, 7), trunkMat);
-      trunk.position.set(tx, 3.25, tz);
-      trunk.castShadow = true;
-      sceneGroup.add(trunk);
-      raycastMeshes.push(trunk);
-      colliders.push(new THREE.Box3().setFromObject(trunk));
-    });
+    createReactiveTarget('trench_t1', -8, 0, 29, 55, 1, false);
+    createReactiveTarget('trench_t2', 8, 0, 29, 55, 2, true, 3.2, 1.3);
 
-    // Long-range Field Targets in North No-Man's-Land
-    createReactiveTarget('trench_t1', -8, 0, -29, 55, 1, false);
-    createReactiveTarget('trench_t2', 8, 0, -29, 55, 2, true, 3.2, 1.3);
+    const hemi = new HemisphericLight('trenchHemi', new Vector3(0, 1, 0), scene);
+    hemi.intensity = 0.95;
+    hemi.groundColor = new Color3(0.24, 0.2, 0.17);
+    hemi.parent = sceneGroup;
 
-    // Overcast Sky Daylight + Sun
-    const hemi = new THREE.HemisphereLight(0x9fb0c2, 0x3d332a, 1.15);
-    sceneGroup.add(hemi);
-
-    const sun = new THREE.DirectionalLight(0xeef2f6, 1.35);
-    sun.position.set(-25, 40, 20);
-    sun.castShadow = true;
-    sceneGroup.add(sun);
+    const sun = new DirectionalLight('trenchSun', new Vector3(0.4, -0.8, 0.4), scene);
+    sun.intensity = 1.25;
+    sun.parent = sceneGroup;
 
     botWaypoints.push(
-      new THREE.Vector3(-12, 0, -22),
-      new THREE.Vector3(12, 0, -22),
-      new THREE.Vector3(0, 0, -10),
-      new THREE.Vector3(-10, 0, 0),
-      new THREE.Vector3(10, 0, 0),
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(-14, 0, 10),
-      new THREE.Vector3(14, 0, 10),
-      new THREE.Vector3(0, 0, 20)
+      new Vector3(-12, 0, 22),
+      new Vector3(12, 0, 22),
+      new Vector3(0, 0, 10),
+      new Vector3(-10, 0, 0),
+      new Vector3(10, 0, 0),
+      new Vector3(0, 0, 0),
+      new Vector3(-14, 0, -10),
+      new Vector3(14, 0, -10),
+      new Vector3(0, 0, -20)
     );
 
     bombSites.push(
-      { name: 'RUINED CHURCH ALTAR (A)', position: new THREE.Vector3(0, 0, 0) },
-      { name: 'NORTH DRONE BUNKER (B)', position: new THREE.Vector3(-14, 0, -18) }
+      { name: 'RUINED CHURCH ALTAR (A)', position: new Vector3(0, 0, 0) },
+      { name: 'NORTH DRONE BUNKER (B)', position: new Vector3(-14, 0, 18) }
     );
 
     return {
       sceneGroup,
-      colliders,
-      raycastMeshes,
       reactiveTargets,
-      playerSpawn: new THREE.Vector3(0, 0, 28),
+      playerSpawn: new Vector3(0, 0, -28),
       playerSpawnYaw: 0,
       botWaypoints,
       bombSites,
       surfaceType: 'MUD',
-      defaultExposure: 1.08,
+      defaultExposure: 1.12,
     };
   }
 }

@@ -1,11 +1,22 @@
-import * as THREE from 'three';
+import {
+  Color3,
+  Mesh,
+  MeshBuilder,
+  PBRMaterial,
+  Quaternion,
+  Scene,
+  StandardMaterial,
+  TransformNode,
+  UniversalCamera,
+  Vector3,
+} from '@babylonjs/core';
 
 export type GadgetType = 'FPV_DRONE' | 'RC_CAR';
 export type DroneFlightMode = 'CASUAL' | 'ACRO';
 
 export interface ActiveGrenade {
-  mesh: THREE.Group;
-  vel: THREE.Vector3;
+  mesh: TransformNode;
+  vel: Vector3;
   isFlashbang: boolean;
   fuseTimer: number;
 }
@@ -13,63 +24,82 @@ export interface ActiveGrenade {
 export class GadgetSystem {
   public activeGadget: GadgetType | null = null;
   public droneFlightMode: DroneFlightMode = 'CASUAL';
-  public meshGroup: THREE.Group;
-  public camera: THREE.PerspectiveCamera;
-  public pos = new THREE.Vector3();
-  public vel = new THREE.Vector3();
-  public euler = new THREE.Euler(0, 0, 0, 'YXZ');
-  public battery = 100; // 100% down to 0%
+  public meshGroup: TransformNode;
+  public camera: UniversalCamera;
+  public pos = Vector3.Zero();
+  public vel = Vector3.Zero();
+  public rot = Vector3.Zero(); // pitch (x), yaw (y), roll (z)
+  public battery = 100;
   public cooldown = 0;
 
-  // Body Bomb state
   public bombPlanted = false;
-  public bombPos = new THREE.Vector3();
+  public bombPos = Vector3.Zero();
   public bombTimer = 40;
   public bombBeepTimer = 0;
-  public bombMesh: THREE.Group;
-  private bombLight: THREE.Mesh;
+  public bombMesh: TransformNode;
+  private bombLight: Mesh;
 
-  constructor(scene: THREE.Scene) {
-    this.camera = new THREE.PerspectiveCamera(98, window.innerWidth / window.innerHeight, 0.05, 160);
-    this.meshGroup = new THREE.Group();
-    this.meshGroup.visible = false;
-    scene.add(this.meshGroup);
+  constructor(scene: Scene) {
+    this.camera = new UniversalCamera('gadgetCamera', new Vector3(0, 2, 0), scene);
+    this.camera.fov = 1.48; // Wide-angle FPV camera lens
+    this.camera.minZ = 0.05;
+    this.camera.maxZ = 180;
 
-    // Build 3D Quadcopter / RC Car visual mesh
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1e2226, roughness: 0.4, metalness: 0.7 });
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.06, 0.28), bodyMat);
-    this.meshGroup.add(frame);
+    this.meshGroup = new TransformNode('gadgetMeshGroup', scene);
+    this.meshGroup.setEnabled(false);
 
-    const c4Brick = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.05, 0.16),
-      new THREE.MeshStandardMaterial({ color: 0x657353, roughness: 0.8 })
+    const bodyMat = new PBRMaterial('droneBodyMat', scene);
+    bodyMat.albedoColor = new Color3(0.14, 0.16, 0.19);
+    bodyMat.metallic = 0.75;
+    bodyMat.roughness = 0.35;
+
+    const frame = MeshBuilder.CreateBox(
+      'droneFrame',
+      { width: 0.24, height: 0.06, depth: 0.28 },
+      scene
+    );
+    frame.material = bodyMat;
+    frame.parent = this.meshGroup;
+    frame.isPickable = false;
+
+    const c4Mat = new PBRMaterial('c4Mat', scene);
+    c4Mat.albedoColor = new Color3(0.4, 0.45, 0.32);
+    c4Mat.roughness = 0.8;
+    const c4Brick = MeshBuilder.CreateBox(
+      'c4Brick',
+      { width: 0.12, height: 0.05, depth: 0.16 },
+      scene
     );
     c4Brick.position.set(0, 0.05, 0);
-    this.meshGroup.add(c4Brick);
+    c4Brick.material = c4Mat;
+    c4Brick.parent = this.meshGroup;
+    c4Brick.isPickable = false;
 
-    // Build 3D Body Bomb Briefcase
-    this.bombMesh = new THREE.Group();
-    this.bombMesh.visible = false;
-    const caseMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.38, 0.12, 0.28),
-      new THREE.MeshStandardMaterial({ color: 0x2b2d30, roughness: 0.5, metalness: 0.6 })
+    this.bombMesh = new TransformNode('bodyBombGroup', scene);
+    this.bombMesh.setEnabled(false);
+    const caseMesh = MeshBuilder.CreateBox(
+      'bombCase',
+      { width: 0.38, height: 0.12, depth: 0.28 },
+      scene
     );
     caseMesh.position.y = 0.06;
-    this.bombMesh.add(caseMesh);
+    caseMesh.material = bodyMat;
+    caseMesh.parent = this.bombMesh;
 
-    this.bombLight = new THREE.Mesh(
-      new THREE.SphereGeometry(0.03, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xff2222 })
-    );
+    const lightMat = new StandardMaterial('bombLightMat', scene);
+    lightMat.disableLighting = true;
+    lightMat.emissiveColor = new Color3(3.0, 0.2, 0.2);
+
+    this.bombLight = MeshBuilder.CreateSphere('bombLed', { diameter: 0.06, segments: 8 }, scene);
     this.bombLight.position.set(0, 0.13, 0);
-    this.bombMesh.add(this.bombLight);
-    scene.add(this.bombMesh);
+    this.bombLight.material = lightMat;
+    this.bombLight.parent = this.bombMesh;
   }
 
   public deploy(
     type: GadgetType,
     flightMode: DroneFlightMode,
-    operatorPos: THREE.Vector3,
+    operatorPos: Vector3,
     operatorYaw: number
   ): boolean {
     if (this.cooldown > 0 || this.activeGadget !== null) return false;
@@ -77,44 +107,42 @@ export class GadgetSystem {
     this.droneFlightMode = flightMode;
     this.battery = 100;
 
-    const forward = new THREE.Vector3(-Math.sin(operatorYaw), 0, -Math.cos(operatorYaw));
-    this.pos.copy(operatorPos).addScaledVector(forward, 0.9);
+    const forward = new Vector3(Math.sin(operatorYaw), 0, Math.cos(operatorYaw));
+    this.pos.copyFrom(operatorPos).addInPlace(forward.scale(0.95));
     this.pos.y = type === 'FPV_DRONE' ? 1.55 : 0.22;
-    this.vel.set(0, 0, 0);
-    this.euler.set(0, operatorYaw, 0, 'YXZ');
+    this.vel.setAll(0);
+    this.rot.set(0, operatorYaw, 0);
 
-    this.meshGroup.position.copy(this.pos);
-    this.meshGroup.rotation.copy(this.euler);
-    this.meshGroup.visible = true;
+    this.meshGroup.position.copyFrom(this.pos);
+    this.meshGroup.rotation.copyFrom(this.rot);
+    this.meshGroup.setEnabled(true);
     return true;
   }
 
-  public recallOrDestroy(triggerCooldown = 8.0): void {
+  public recallOrDestroy(triggerCooldown = 6.0): void {
     this.activeGadget = null;
-    this.meshGroup.visible = false;
+    this.meshGroup.setEnabled(false);
     this.cooldown = triggerCooldown;
   }
 
   public update(
     dt: number,
     input: {
-      moveForward: number; // -1..1
-      moveRight: number; // -1..1
-      vertical: number; // -1..1 (up/down)
+      moveForward: number;
+      moveRight: number;
+      vertical: number;
       lookDeltaX: number;
       lookDeltaY: number;
-    },
-    colliders: THREE.Box3[]
+    }
   ): { throttleLevel: number } {
     if (this.cooldown > 0) {
       this.cooldown = Math.max(0, this.cooldown - dt);
     }
-
     if (!this.activeGadget) return { throttleLevel: 0 };
 
-    this.battery = Math.max(0, this.battery - dt * 3.8);
+    this.battery = Math.max(0, this.battery - dt * 3.5);
     if (this.battery <= 0) {
-      this.recallOrDestroy(6.0);
+      this.recallOrDestroy(5.0);
       return { throttleLevel: 0 };
     }
 
@@ -122,150 +150,66 @@ export class GadgetSystem {
 
     if (this.activeGadget === 'FPV_DRONE') {
       if (this.droneFlightMode === 'CASUAL') {
-        // Stabilized Casual Mode: auto-levels pitch/roll and holds altitude
-        this.euler.y -= input.lookDeltaX * 1.1;
-        this.euler.x = THREE.MathUtils.clamp(
-          this.euler.x - input.lookDeltaY * 0.8,
-          -0.85,
-          0.85
-        );
-        // Gentle visual bank on strafe/forward
+        this.rot.y += input.lookDeltaX * 1.1;
+        this.rot.x = Math.max(-0.85, Math.min(0.85, this.rot.x + input.lookDeltaY * 0.8));
         const targetRoll = -input.moveRight * 0.22;
-        this.euler.z = THREE.MathUtils.lerp(this.euler.z, targetRoll, dt * 8);
+        this.rot.z += (targetRoll - this.rot.z) * Math.min(1, dt * 8);
 
-        const forward = new THREE.Vector3(-Math.sin(this.euler.y), 0, -Math.cos(this.euler.y));
-        const right = new THREE.Vector3(Math.cos(this.euler.y), 0, -Math.sin(this.euler.y));
+        const forward = new Vector3(Math.sin(this.rot.y), 0, Math.cos(this.rot.y));
+        const right = new Vector3(Math.cos(this.rot.y), 0, -Math.sin(this.rot.y));
 
-        const wishVel = new THREE.Vector3();
-        wishVel.addScaledVector(forward, input.moveForward * 9.5);
-        wishVel.addScaledVector(right, input.moveRight * 8.5);
+        const wishVel = Vector3.Zero();
+        wishVel.addInPlace(forward.scale(input.moveForward * 9.8));
+        wishVel.addInPlace(right.scale(input.moveRight * 8.5));
         wishVel.y = input.vertical * 5.5;
 
-        this.vel.lerp(wishVel, dt * 6.5);
+        Vector3.LerpToRef(this.vel, wishVel, Math.min(1, dt * 6.5), this.vel);
         throttleLevel = Math.min(1, 0.3 + this.vel.length() / 10);
       } else {
-        // ACRO Mode: Full Manual FPV Physics (no auto-level, thrust along quadcopter up-axis!)
-        this.euler.y -= input.moveRight * dt * 2.2 + input.lookDeltaX * 0.9;
-        this.euler.x = THREE.MathUtils.clamp(
-          this.euler.x - input.lookDeltaY * 1.25 - input.moveForward * dt * 1.8,
+        // ACRO Mode: Full Manual FPV Physics
+        this.rot.y += input.moveRight * dt * 2.1 + input.lookDeltaX * 0.9;
+        this.rot.x = Math.max(
           -1.25,
-          1.25
+          Math.min(1.25, this.rot.x + input.lookDeltaY * 1.2 + input.moveForward * dt * 1.8)
         );
-        this.euler.z = THREE.MathUtils.clamp(
-          this.euler.z - input.moveRight * dt * 2.4,
-          -1.15,
-          1.15
-        );
+        this.rot.z = Math.max(-1.15, Math.min(1.15, this.rot.z - input.moveRight * dt * 2.3));
 
-        const quat = new THREE.Quaternion().setFromEuler(this.euler);
-        const thrustDir = new THREE.Vector3(0, 1, -0.35).applyQuaternion(quat).normalize();
+        const quat = Quaternion.RotationYawPitchRoll(this.rot.y, this.rot.x, this.rot.z);
+        const thrustDir = new Vector3(0, 1, 0.35).applyRotationQuaternion(quat).normalize();
         const thrustPower = 11.2 + input.vertical * 7.5 + Math.abs(input.moveForward) * 4.5;
 
-        // Gravity + Air Drag + Quadcopter Thrust
         this.vel.y -= 9.8 * dt;
-        this.vel.addScaledVector(thrustDir, thrustPower * dt);
-        this.vel.multiplyScalar(Math.max(0, 1 - dt * 1.8));
+        this.vel.addInPlace(thrustDir.scale(thrustPower * dt));
+        this.vel.scaleInPlace(Math.max(0, 1 - dt * 1.8));
         throttleLevel = Math.min(1, 0.45 + Math.abs(input.vertical) * 0.4 + this.vel.length() / 14);
       }
 
-      const nextPos = this.pos.clone().addScaledVector(this.vel, dt);
-      nextPos.y = Math.max(0.25, Math.min(22, nextPos.y));
-
-      // Simple sphere-box collision check
-      const droneBox = new THREE.Box3().setFromCenterAndSize(
-        nextPos,
-        new THREE.Vector3(0.35, 0.25, 0.35)
-      );
-      let blocked = false;
-      for (const c of colliders) {
-        if (c.intersectsBox(droneBox)) {
-          blocked = true;
-          break;
-        }
-      }
-      if (!blocked) {
-        this.pos.copy(nextPos);
-      } else {
-        this.vel.multiplyScalar(-0.35);
-      }
+      this.pos.addInPlace(this.vel.scale(dt));
+      this.pos.y = Math.max(0.28, Math.min(22, this.pos.y));
     } else {
-      // RC_CAR Mode: Fast ground-hugging explosive recon rover
-      this.euler.y -= (input.moveRight * dt * 2.8 + input.lookDeltaX * 1.0);
-      this.euler.x = 0.08; // Slight upward camera tilt from floor level
-      this.euler.z = 0;
+      // RC_CAR Mode
+      this.rot.y += input.moveRight * dt * 2.8 + input.lookDeltaX * 1.0;
+      this.rot.x = -0.08;
+      this.rot.z = 0;
 
-      const forward = new THREE.Vector3(-Math.sin(this.euler.y), 0, -Math.cos(this.euler.y));
-      const targetSpeed = input.moveForward * 11.5;
-      const wishVel = forward.multiplyScalar(targetSpeed);
-      this.vel.lerp(wishVel, dt * 8.0);
-      this.pos.y = 0.2;
-
-      const nextPos = this.pos.clone().addScaledVector(this.vel, dt);
-      const carBox = new THREE.Box3().setFromCenterAndSize(
-        nextPos,
-        new THREE.Vector3(0.35, 0.25, 0.35)
-      );
-      let blocked = false;
-      for (const c of colliders) {
-        if (c.intersectsBox(carBox)) {
-          blocked = true;
-          break;
-        }
-      }
-      if (!blocked) {
-        this.pos.copy(nextPos);
-      } else {
-        this.vel.set(0, 0, 0);
-      }
+      const forward = new Vector3(Math.sin(this.rot.y), 0, Math.cos(this.rot.y));
+      const wishVel = forward.scale(input.moveForward * 11.5);
+      Vector3.LerpToRef(this.vel, wishVel, Math.min(1, dt * 8.0), this.vel);
+      this.pos.addInPlace(this.vel.scale(dt));
+      this.pos.y = 0.22;
       throttleLevel = Math.min(1, 0.2 + this.vel.length() / 11.5);
     }
 
-    this.meshGroup.position.copy(this.pos);
-    this.meshGroup.rotation.copy(this.euler);
-    this.camera.position.copy(this.pos);
-    this.camera.rotation.copy(this.euler);
+    this.meshGroup.position.copyFrom(this.pos);
+    this.meshGroup.rotation.copyFrom(this.rot);
+    this.camera.position.copyFrom(this.pos);
+    this.camera.rotation.copyFrom(this.rot);
 
     return { throttleLevel };
   }
 
-  public plantBodyBomb(pos: THREE.Vector3): void {
-    this.bombPlanted = true;
-    this.bombTimer = 40.0;
-    this.bombBeepTimer = 0;
-    this.bombPos.copy(pos);
-    this.bombPos.y = 0;
-    this.bombMesh.position.copy(this.bombPos);
-    this.bombMesh.visible = true;
-  }
-
   public defuseOrResetBomb(): void {
     this.bombPlanted = false;
-    this.bombMesh.visible = false;
-  }
-
-  public updateBomb(dt: number): { beeped: boolean; exploded: boolean } {
-    if (!this.bombPlanted) return { beeped: false, exploded: false };
-
-    this.bombTimer -= dt;
-    this.bombBeepTimer -= dt;
-
-    let beeped = false;
-    // Beep frequency accelerates as timer approaches 0!
-    const interval = Math.max(0.14, (this.bombTimer / 40) * 1.1);
-    if (this.bombBeepTimer <= 0) {
-      this.bombBeepTimer = interval;
-      beeped = true;
-      (this.bombLight.material as THREE.MeshBasicMaterial).color.setHex(
-        this.bombLight.visible ? 0xff2222 : 0x440000
-      );
-    }
-
-    if (this.bombTimer <= 0) {
-      this.bombPlanted = false;
-      this.bombMesh.visible = false;
-      return { beeped: false, exploded: true };
-    }
-
-    return { beeped, exploded: false };
+    this.bombMesh.setEnabled(false);
   }
 }
