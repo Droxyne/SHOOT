@@ -1,0 +1,34 @@
+{
+  "name": "shoot-bodycam-fps",
+  "version": "0.8.0",
+  "description": "Hyper-Realistic 3D Tactical Bodycam FPS inspired by Reissad Studio's Bodycam (v0.8 Locked & Loaded) — Mobile-First Touch & Desktop WebGL2 Engine",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Droxyne/SHOOT.git"
+  },
+  "keywords": [
+    "bodycam",
+    "reissad-studio",
+    "fps",
+    "threejs",
+    "webgl",
+    "tactical-shooter",
+    "mobile-fps"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@types/three": "^0.183.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.0"
+  }
+}

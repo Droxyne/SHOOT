@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <title>SHOOT // BODYCAM v0.8: LOCKED &amp; LOADED — Tactical 3D FPS</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Subtle optional point-aim dot + dynamic hitmarker -->
+    <div id="freeaim-reticle"></div>
+    <svg id="hitmarker" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5">
+      <line x1="3" y1="3" x2="9" y2="9" />
+      <line x1="21" y1="3" x2="15" y2="9" />
+      <line x1="3" y1="21" x2="9" y2="15" />
+      <line x1="21" y1="21" x2="15" y2="15" />
+    </svg>
+
+    <!-- Diegetic Mag Check / Stress Reload Banner -->
+    <div id="diegetic-banner">MAG CHECK: FULL (~30 RNDS) +1 CHAMBER</div>
+
+    <!-- FPV DRONE & RC CAR OSD OVERLAY -->
+    <div id="drone-osd">
+      <div style="display: flex; justify-content: space-between; font-size: 12px">
+        <div>
+          <div id="drone-title-osd">REISSAD FPV RECON DRONE // CH-4 5.8GHz</div>
+          <div id="drone-mode-osd">FLIGHT PROFILE: CASUAL (STABILIZED)</div>
+        </div>
+        <div style="text-align: right">
+          <div id="drone-batt-osd">BATT: 100% (16.8V 4S)</div>
+          <div id="drone-coords-osd">ALT: 2.1m // RSSI: 99%</div>
+        </div>
+      </div>
+
+      <div class="drone-crosshair">
+        <div style="width: 6px; height: 6px; background: #38bdf8; border-radius: 50%"></div>
+      </div>
+
+      <div class="drone-controls-bar">
+        <button class="tac-btn amber" id="btn-drone-flightmode">SWITCH CASUAL / ACRO</button>
+        <button class="tac-btn danger" id="btn-drone-detonate">DETONATE C4 PAYLOAD [SPACE]</button>
+        <button class="tac-btn" id="btn-drone-recall">EXIT GADGET [G]</button>
+      </div>
+    </div>
+
+    <!-- AXON BODY 4 DIEGETIC CAMERA OVERLAY -->
+    <div id="bodycam-overlay">
+      <div>
+        <div class="axon-header">
+          <div class="axon-stamp" id="axon-timestamp-box">
+            <div>
+              <span class="rec-dot"></span><strong>AXON BODY 4 // X84392104</strong> · REISSAD
+              v0.8
+            </div>
+            <div id="axon-clock">2026-10-18 23:30:00 UTC · 1080P 60FPS · EIS OFF</div>
+            <div id="axon-mode-line" style="color: #fde68a">
+              MAP: SHOOTING RANGE HUB · MODE: TRAINING · RP: 12,500
+            </div>
+          </div>
+
+          <!-- Top Interactive Quick-Testing Toolbar (Mobile & Desktop friendly) -->
+          <div class="top-quickbar">
+            <button class="tac-btn amber" id="btn-open-tablet" title="Open v0.8 Tactical Tablet [TAB]">
+              📱 TABLET / LOADOUT [TAB]
+            </button>
+            <button class="tac-btn active" id="btn-start-drill" title="Start 30s Pop-Up Target Drill">
+              🎯 30s REFLEX DRILL
+            </button>
+            <button class="tac-btn" id="btn-spawn-bots" title="Spawn or Reset Tactical AI Bots">
+              🤖 SPAWN BOTS (4)
+            </button>
+            <button class="tac-btn" id="btn-zone-jump" title="Switch between Range Lanes & CQB Killhouse">
+              🏠 TO KILLHOUSE
+            </button>
+            <button class="tac-btn" id="btn-deploy-drone" title="Launch FPV Drone [G]">
+              🚁 FPV DRONE [G]
+            </button>
+            <button class="tac-btn" id="btn-toggle-nvg" title="Toggle Night Vision [N]">
+              🟢 NVG [N]
+            </button>
+            <button class="tac-btn active" id="btn-toggle-assist" title="Mobile Aim Magnetism & Smart Auto-Fire">
+              🧲 AIM ASSIST: ON
+            </button>
+            <button class="tac-btn" id="btn-pure-bodycam" title="Toggle Pure No-HUD Bodycam Mode [H]">
+              👁️ DIEGETIC HUD
+            </button>
+          </div>
+        </div>
+
+        <!-- Range Ballistic Telemetry & Killfeed -->
+        <div class="hud-mid-row" id="hud-telemetry-row">
+          <div class="telemetry-card">
+            <div class="telemetry-title" id="telemetry-header">
+              BALLISTIC TELEMETRY &amp; RANGE STATS
+            </div>
+            <div id="telemetry-last-hit">LAST HIT: READY — AIM AT 10m–75m STEEL TARGETS</div>
+            <div id="telemetry-accuracy">HITS: 0 / 0 (0%) · HEADSHOTS: 0 · KILLS: 0</div>
+            <div id="telemetry-drill" style="color: #86efac; margin-top: 2px">
+              DRILL IDLE — TAP [🎯 30s REFLEX DRILL] TO TEST SPEED
+            </div>
+          </div>
+
+          <div id="killfeed-container"></div>
+        </div>
+      </div>
+
+      <!-- Bottom Operator Physiology & Weapon Status -->
+      <div class="hud-bottom-bar" id="hud-bottom-cluster">
+        <div class="status-cluster">
+          <div style="display: flex; justify-content: space-between">
+            <span>OPERATOR VITALS</span>
+            <span id="hud-hp-text" style="color: #86efac; font-weight: 700">100 HP</span>
+          </div>
+          <div class="meter-row">
+            <span style="font-size: 9px; color: #94a3b8; width: 46px">HEALTH</span>
+            <div class="meter-bar-bg">
+              <div
+                class="meter-bar-fill"
+                id="hud-hp-bar"
+                style="width: 100%; background: #22c55e"
+              ></div>
+            </div>
+          </div>
+          <div class="meter-row">
+            <span style="font-size: 9px; color: #94a3b8; width: 46px">STRESS</span>
+            <div class="meter-bar-bg">
+              <div
+                class="meter-bar-fill"
+                id="hud-stress-bar"
+                style="width: 8%; background: #f59e0b"
+              ></div>
+            </div>
+          </div>
+          <div
+            id="hud-stress-state"
+            style="font-size: 9px; color: #cbd5e1; margin-top: 4px"
+          >
+            STATE: CALM (PRECISION RELOAD) · STANCE: STAND
+          </div>
+        </div>
+
+        <div class="status-cluster" style="text-align: right; min-width: 225px">
+          <div
+            id="hud-weapon-name"
+            style="color: #fde68a; font-weight: 700; font-size: 12px"
+          >
+            M4 [5.56x45mm NATO]
+          </div>
+          <div id="hud-weapon-attachments" style="font-size: 9px; color: #94a3b8">
+            Aimpoint Red Dot · Standard Flash Hider · PEQ-15 Laser+Light
+          </div>
+          <div
+            id="hud-ammo-estimate"
+            style="margin-top: 4px; font-weight: 700; color: #f8fafc"
+          >
+            MAG: FULL [~30] · SPARE: 4 MAGS · [B] AUTO
+          </div>
+          <div style="font-size: 9px; color: #94a3b8; margin-top: 2px">
+            [R] RELOAD · [M] MAG CHECK · [Q/E] LEAN · [F] LIGHT · [1/2] SWAP
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PRIMARY TARGET: ERGONOMIC MOBILE DUAL-STICK & CLAW TOUCH LAYER -->
+    <div id="mobile-touch-layer">
+      <!-- Left Half: Dynamic Virtual Thumbstick for 360° Walk/Sprint -->
+      <div id="touch-move-zone">
+        <div class="joystick-base" id="joystick-base">
+          <div class="joystick-sprint-label">PUSH UP = SPRINT</div>
+          <div class="joystick-stick" id="joystick-stick"></div>
+        </div>
+      </div>
+
+      <!-- Right Half: Free-Aim Inertia Look Pad -->
+      <div id="touch-look-zone"></div>
+
+      <!-- Left-Hand Claw Fire + Lean L/R + Flashlight Buttons -->
+      <button class="touch-btn fire-left-claw" id="tbtn-fire-left">L-FIRE</button>
+      <button class="touch-btn lean-l-btn" id="tbtn-lean-l">LEAN<br />L</button>
+      <button class="touch-btn lean-r-btn" id="tbtn-lean-r">LEAN<br />R</button>
+      <button class="touch-btn light-btn" id="tbtn-light">🔦<br />LIGHT</button>
+
+      <!-- Right-Hand Primary Fire (Drag-to-Aim while firing!) + Tactical Controls -->
+      <button class="touch-btn fire-primary" id="tbtn-fire-right">🔥<br />FIRE</button>
+      <button class="touch-btn ads-btn" id="tbtn-ads">🎯<br />ADS</button>
+      <button class="touch-btn reload-btn" id="tbtn-reload">🔄<br />RELOAD</button>
+      <button class="touch-btn magcheck-btn" id="tbtn-magcheck">🔍<br />MAG</button>
+      <button class="touch-btn crouch-btn" id="tbtn-crouch">🧎<br />CROUCH</button>
+      <button class="touch-btn swap-btn" id="tbtn-swap">🔀<br />SWAP</button>
+      <button class="touch-btn grenade-btn" id="tbtn-grenade">💣<br />THROW</button>
+      <button class="touch-btn drone-btn" id="tbtn-drone">🚁<br />GADGET</button>
+    </div>
+
+    <!-- v0.8 IN-WORLD TACTICAL TABLET MODAL -->
+    <div id="tactical-tablet-modal">
+      <div class="tablet-bezel">
+        <div class="tablet-topbar">
+          <div>
+            <div class="tablet-brand">
+              REISSAD TACTICAL OS v0.8 // LOCKED &amp; LOADED TABLET
+            </div>
+            <div style="font-family: var(--font-mono); font-size: 10px; color: #94a3b8">
+              OPERATOR REISSAD POINTS: <strong style="color: #fde68a" id="tablet-rp-balance">12,500 RP</strong> (ALL WEAPONS &amp; ATTACHMENTS UNLOCKED FOR TESTING)
+            </div>
+          </div>
+
+          <div class="tablet-tabs">
+            <button class="tab-btn active" data-tab="loadout">1. WEAPONS &amp; ATTACHMENTS</button>
+            <button class="tab-btn" data-tab="mission">2. MAPS, MODES &amp; AI BOTS</button>
+            <button class="tab-btn" data-tab="optics">3. BODYCAM OPTICS &amp; CONTROLS</button>
+            <button class="tab-btn" data-tab="intel">4. REISSAD BODYCAM RESEARCH</button>
+          </div>
+
+          <button class="tac-btn danger" id="btn-close-tablet">RESUME COMBAT [ESC / TAB]</button>
+        </div>
+
+        <!-- TAB 1: LOADOUT & 8-STAT ATTACHMENT BUILDER -->
+        <div class="tablet-body" id="tab-content-loadout">
+          <div class="tablet-grid-2">
+            <div class="card-panel">
+              <h3>PRIMARY &amp; SECONDARY ARSENAL (18 AUTHENTIC v0.8 WEAPONS)</h3>
+              <div style="display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap" id="weapon-cat-filters">
+                <button class="attach-chip selected" data-cat="ALL">ALL (18)</button>
+                <button class="attach-chip" data-cat="Assault Rifles">ASSAULT RIFLES</button>
+                <button class="attach-chip" data-cat="SMGs & Machine Pistols">SMGs</button>
+                <button class="attach-chip" data-cat="Shotguns">SHOTGUNS</button>
+                <button class="attach-chip" data-cat="Sniper Rifles">SNIPERS</button>
+                <button class="attach-chip" data-cat="Pistols & Revolvers">PISTOLS</button>
+              </div>
+              <div class="weapon-grid" id="tablet-weapon-list"></div>
+
+              <div style="margin-top: 12px">
+                <h3>MODULAR ATTACHMENTS (v0.8 8-EFFECT MATRIX)</h3>
+                <div id="tablet-attachment-slots"></div>
+              </div>
+            </div>
+
+            <div class="card-panel">
+              <h3 id="inspector-weapon-title">WEAPON BALLISTICS &amp; v0.8 STATS</h3>
+              <p
+                id="inspector-weapon-desc"
+                style="font-size: 12px; color: #cbd5e1; margin-bottom: 12px; line-height: 1.45"
+              ></p>
+              <div id="inspector-stat-bars"></div>
+
+              <div style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px">
+                <h3>TACTICAL THROWABLE &amp; v0.8 GADGET SLOT</h3>
+                <div class="attach-slot-group">
+                  <div class="attach-slot-label">GRENADE SELECTION [G / THROW]</div>
+                  <div class="attach-options">
+                    <button class="attach-chip selected" id="select-gren-frag">
+                      M67 FRAG GRENADE (SHRAPNEL)
+                    </button>
+                    <button class="attach-chip" id="select-gren-flash">
+                      M84 STUN FLASHBANG (BLIND + TINNITUS)
+                    </button>
+                  </div>
+                </div>
+                <div class="attach-slot-group">
+                  <div class="attach-slot-label">LOCKED &amp; LOADED REMOTE GADGET</div>
+                  <div class="attach-options">
+                    <button class="attach-chip selected" id="select-gad-drone">
+                      FPV QUAD DRONE (CASUAL / ACRO)
+                    </button>
+                    <button class="attach-chip" id="select-gad-rccar">
+                      RECON EXPLOSIVE RC CAR
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: MAPS, GAME MODES & BOT AI SPAWNER -->
+        <div class="tablet-body" id="tab-content-mission" style="display: none">
+          <div class="tablet-grid-2">
+            <div class="card-panel">
+              <h3>SELECT 3D ARENA MAP</h3>
+              <div id="tablet-map-list" style="display: grid; gap: 8px"></div>
+
+              <h3 style="margin-top: 14px">AI BOTS &amp; TRAINING CONTROLS</h3>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px">
+                <button class="tac-btn active" id="tab-btn-bot-add">+ SPAWN AI BOT</button>
+                <button class="tac-btn" id="tab-btn-bot-ally">+ SPAWN ALLY WINGMAN</button>
+                <button class="tac-btn danger" id="tab-btn-bot-clear">CLEAR ALL BOTS</button>
+              </div>
+              <div class="attach-slot-label">AI BOT DIFFICULTY &amp; BEHAVIOR</div>
+              <div class="attach-options" style="margin-top: 4px">
+                <button class="attach-chip selected" data-botmode="PATROL_COMBAT">
+                  TACTICAL PATROL &amp; PEEK AI
+                </button>
+                <button class="attach-chip" data-botmode="STATIONARY_GUARD">
+                  STATIONARY TARGET GUARDS
+                </button>
+                <button class="attach-chip" data-botmode="ZOMBIE_RUSH">
+                  ZOMBIE HORDE RUSH
+                </button>
+              </div>
+            </div>
+
+            <div class="card-panel">
+              <h3>SELECT BODYCAM GAME MODE (7 MODES)</h3>
+              <div id="tablet-mode-list" style="display: grid; gap: 8px"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: BODYCAM OPTICS SHADER & MOBILE TOUCH SETTINGS -->
+        <div class="tablet-body" id="tab-content-optics" style="display: none">
+          <div class="tablet-grid-2">
+            <div class="card-panel">
+              <h3>AXON BODY 4 GLSL SHADER PARAMETERS</h3>
+              <div class="stat-row">
+                <span>Fisheye Barrel Distortion</span>
+                <input
+                  type="range"
+                  id="slider-fisheye"
+                  min="0"
+                  max="0.65"
+                  step="0.02"
+                  value="0.34"
+                />
+              </div>
+              <div class="stat-row">
+                <span>Chromatic Aberration Fringe</span>
+                <input
+                  type="range"
+                  id="slider-chromatic"
+                  min="0"
+                  max="0.015"
+                  step="0.001"
+                  value="0.004"
+                />
+              </div>
+              <div class="stat-row">
+                <span>CMOS Sensor ISO Grain</span>
+                <input
+                  type="range"
+                  id="slider-grain"
+                  min="0"
+                  max="0.12"
+                  step="0.005"
+                  value="0.048"
+                />
+              </div>
+              <div class="stat-row">
+                <span>Master Acoustic Volume</span>
+                <input
+                  type="range"
+                  id="slider-volume"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value="0.85"
+                />
+              </div>
+            </div>
+
+            <div class="card-panel">
+              <h3>MOBILE TOUCH &amp; FREE-AIM ERGONOMICS</h3>
+              <div class="stat-row">
+                <span>Touch / Mouse Look Sensitivity</span>
+                <input
+                  type="range"
+                  id="slider-sens"
+                  min="0.3"
+                  max="2.5"
+                  step="0.1"
+                  value="1.0"
+                />
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px">
+                <button class="tac-btn active" id="opt-toggle-touchhud">
+                  📱 ON-SCREEN MOBILE TOUCH BUTTONS: VISIBLE
+                </button>
+                <button class="tac-btn" id="opt-toggle-gyro">
+                  🧭 MOBILE GYROSCOPE TILT AIMING: OFF
+                </button>
+                <button class="tac-btn" id="opt-toggle-centerdot">
+                  ➕ FAINT CENTER POINT-AIM DOT: OFF (TRUE BODYCAM)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 4: REISSAD STUDIO BODYCAM RESEARCH DOSSIER -->
+        <div class="tablet-body" id="tab-content-intel" style="display: none">
+          <div class="card-panel" style="line-height: 1.55; font-size: 12px; color: #e2e8f0">
+            <h3>REISSAD STUDIO’S BODYCAM (v0.8 LOCKED &amp; LOADED) — TECHNICAL ANALYSIS</h3>
+            <p style="margin-bottom: 8px">
+              <strong>Developer:</strong> Reissad Studio (founded by French indie developers Luca &amp; Léo). Built on Unreal Engine 5, released in Early Access June 7, 2024, with the landmark <strong>v0.8 "Locked &amp; Loaded"</strong> overhaul launched September 2, 2026.
+            </p>
+            <ul style="padding-left: 18px; display: grid; gap: 6px">
+              <li>
+                <strong>True Body &amp; Unlinked Free-Aim Deadzone:</strong> Unlike standard FPS games where the gun is glued to the screen center, Bodycam mounts a wide-angle fisheye camera to the operator’s chest while arms and weapons pivot independently inside a physical deadzone with spring-damper inertia. Bullets travel along the true 3D barrel vector.
+              </li>
+              <li>
+                <strong>v0.8 Stress-Driven Dynamic Reloads:</strong> A real-time Stress parameter calculated from suppression, nearby explosions, and combat intensity alters reload animations—causing operators under pressure (&gt;50% stress) to fumble magazines, shake, and take longer to chamber rounds.
+              </li>
+              <li>
+                <strong>No HUD &amp; Diegetic Mag Checks:</strong> No traditional crosshairs or digital ammo counters. Operators rely on physical iron sights/optics, visible laser beams, flashlights, and pulling the magazine out slightly (<code>[M]</code>) to check remaining brass rounds.
+              </li>
+              <li>
+                <strong>v0.8 Arsenal &amp; 8-Effect Attachment System:</strong> 24+ weapons across Assault Rifles (<em>SKR-H, M4, KA-74, KA-74M, M16-1A, Drako</em>), SMGs (<em>Veaper 1200 RPM, SG9-X, SG5-K, UZ-1</em>), Shotguns (<em>BK-101, BK-102S, Vaiga, R12</em>), Snipers (<em>Rivington 700 bolt-action, VSD, LAR</em>), and Pistols (<em>Mlock19, Deagle, CR-75, M1914, Revolver</em>). Attachments modify ADS Speed, Switch Speed, Reload Speed, Horizontal/Vertical Recoil, Spread, Kick, and Capacity.
+              </li>
+              <li>
+                <strong>Tactical Tablet, FPV Drones &amp; RC Cars:</strong> Menus live inside an in-world Tactical Tablet. Operators deploy FPV Drones (with Stabilized Casual or Full-Manual Acro physics) and explosive RC Cars, while their operator body remains vulnerable in the world.
+              </li>
+              <li>
+                <strong>Law-Enforcement Redacted Faces &amp; Ragdoll Stumbling:</strong> Operator faces feature pixelated mosaic blur, and non-lethal hits trigger physical Ragdoll Stumbling before collapse.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
